@@ -8,8 +8,8 @@ This Python tool automates the manual verification and correction of data extrac
 *   **OCR Integration:** Uses `pytesseract` (with Tesseract OCR engine) to extract text from images.
     *   Supports English (`eng`) for general text (e.g., container numbers).
     *   Supports Thai and English (`tha+eng`) for license plates.
-*   **Rule-Based Verification:** Automatically applies four specific rules for data correction (see "Output Rules" below).
-*   **Intelligent Comparison:** Cleans and normalizes text before comparison (e.g., removing spaces, standardizing case).
+*   **Rule-Based Verification:** Automatically applies specific rules for data correction (see "Output Rules" and "Special Handling & Business Logic" below).
+*   **Intelligent Comparison:** Cleans and normalizes text before comparison (e.g., removing spaces, standardizing case, specific transformations for license plates).
 *   **Multiprocessing:** Utilizes multiple CPU cores to significantly speed up the OCR process for large datasets.
 *   **Command-Line Interface:** Allows specifying input and output files via CLI arguments using `argparse`.
 *   **Output Generation:** Saves results to a new Excel file with original data and added "corrected" columns.
@@ -47,14 +47,18 @@ The script expects your input Excel file (e.g., `input.xlsx`) to have specific c
     *   `license_plate_number`
     *   `license_plate_province`
 *   **Image File Paths:**
-    *   `container_image_path`: Full path to the image for container number verification.
-    *   `plate_image_path`: Full path to the image for license plate verification.
+    *   `left_camera_image_file`: Path to the left camera image for container verification.
+    *   `right_camera_image_file`: Path to the right camera image for container verification.
+    *   `top_camera_image_file`: Path to the top camera image for container verification.
+    *   `license_plate_image_file`: Path to the image for license plate verification.
 *   **Corrected Data Columns (Output - these will be created by the script):**
     *   `corrected_container_number`
     *   `corrected_license_plate_number`
     *   `corrected_license_plate_province`
 
-**Note:** If your input Excel file is not found when you first run the script, a dummy file with these headers and some sample data will be created. You can use this as a template. The column names can be changed directly in the `config` dictionary within the `data_verifier.py` script if needed.
+**Note on Input File Naming:** The input Excel file is often named based on the date, e.g., `9-6-2025.xlsx`. The script accepts any valid file name provided as a command-line argument.
+
+**Note on Configuration:** If your input Excel file is not found when you first run the script, a dummy file with these headers and some sample data will be created. You can use this as a template. The column names can be changed directly in the `config` dictionary within the `main.py` script if needed.
 
 ## Image Requirements
 *   Image paths in the Excel file must be absolute or relative paths accessible from where the script is run.
@@ -64,34 +68,47 @@ The script expects your input Excel file (e.g., `input.xlsx`) to have specific c
 ## How to Run
 1.  Ensure all requirements (Python, Tesseract, Python libraries) are installed.
 2.  Open your terminal or command prompt.
-3.  Navigate to the directory where `data_verifier.py` is located.
+3.  Navigate to the directory where `main.py` is located.
 4.  Run the script using the following command structure:
 
     ```bash
-    python data_verifier.py <your_input_excel.xlsx> -o <your_output_excel.xlsx>
+    python main.py <your_input_excel.xlsx> -o <your_output_excel.xlsx>
     ```
     *   **`<your_input_excel.xlsx>`:** (Required) Replace with the path to your input Excel file.
     *   **`-o <your_output_excel.xlsx>`:** (Optional) Replace with your desired output file name. If omitted, it defaults to `corrected_output.xlsx`.
 
     **Example:**
     ```bash
-    python data_verifier.py my_data.xlsx -o verified_data.xlsx
+    python main.py 9-6-2025.xlsx -o verified_data.xlsx
     ```
 
 ### Tesseract Path Configuration (If Needed)
-If Tesseract is installed but `pytesseract` cannot find it (e.g., it's not in your system PATH), you can explicitly set the path to the Tesseract executable within the `data_verifier.py` script. Near the top of the file, uncomment and modify the following line:
+If Tesseract is installed but `pytesseract` cannot find it (e.g., it's not in your system PATH), you can explicitly set the path to the Tesseract executable within the `main.py` script. Near the top of the file, uncomment and modify the following line:
 ```python
 # pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe' # Example for Windows
 # pytesseract.pytesseract.tesseract_cmd = r'/usr/bin/tesseract' # Example for Linux
 ```
 
-## Output
+## Output Rules
 The script generates a new Excel file (e.g., `corrected_output.xlsx`) containing all original data plus the new "corrected" columns. The "corrected" columns are populated based on these rules:
 
-1.  **Perfect Match:** If the Excel record matches the image information, the corrected column is left **blank**.
-2.  **Mismatch:** If the Excel record does not match the image, the correct information (read from the image via OCR) is entered into the corrected column.
-3.  **Unreadable Image:** If the image is flawed, blurry, or OCR cannot read it, a single hyphen (`-`) is entered.
-4.  **Missing Image:** If a record has no corresponding image file (path invalid or missing), two hyphens (`--`) are entered.
+1.  **Perfect Match:** If the Excel record matches the image information (after applying relevant normalizations), the corrected column is left **blank**.
+2.  **Mismatch:** If the Excel record does not match the image, the correct information (read from the image via OCR and appropriately formatted) is entered into the corrected column.
+3.  **Unreadable Image:** If image(s) exist but OCR cannot read usable text from any of them, a single hyphen (`-`) is entered.
+4.  **Missing Image:** If a record has no corresponding image file (path invalid or missing for all relevant image columns), two hyphens (`--`) are entered.
+
+## Special Handling & Business Logic
+
+### License Plate Number Transformation
+A key transformation is applied to license plate numbers extracted from images:
+- Hyphens (`-`) are converted to commas (`,`). For example, if OCR reads `740-699`, it's treated as `740,699`. Similarly, `74-699` becomes `74,699`.
+- For comparison accuracy, the script normalizes both the Excel value and the OCR value by removing all non-alphanumeric characters before deciding if a correction is needed. If they differ, the comma-formatted OCR version is stored.
+
+### Container Number - Multi-Image Strategy
+For container number verification, the script processes images from up to three columns in a specific order: `left_camera_image_file`, then `right_camera_image_file`, then `top_camera_image_file`.
+- The OCR result from the *first* image in this sequence that exists and provides readable text is used.
+- If all specified image paths for a record are empty or invalid (file not found), `'--'` is written to the `corrected_container_number` column.
+- If image(s) exist but all are unreadable by OCR, `'-'` is written to the `corrected_container_number` column.
 
 ## Performance
 The script uses Python's `multiprocessing` module to process multiple images concurrently, significantly reducing processing time for large datasets. The number of CPU cores used is typically one less than the total available, to maintain system responsiveness.
@@ -100,9 +117,9 @@ The script uses Python's `multiprocessing` module to process multiple images con
 *   **`pytesseract.TesseractNotFoundError: tesseract is not installed or not found in your PATH`**:
     *   Ensure Tesseract OCR is installed correctly (see Requirements).
     *   Verify that the Tesseract installation directory is added to your system's PATH environment variable.
-    *   If issues persist, try setting the `pytesseract.tesseract_cmd` path directly in the script as described above.
+    *   If issues persist, try setting the `pytesseract.tesseract_cmd` path directly in the `main.py` script as described above.
 *   **OCR Accuracy Issues**:
     *   OCR quality heavily depends on the input image quality. Ensure images are clear, well-lit, and text is reasonably large.
-    *   The script uses basic text cleaning. For very noisy images or complex layouts, OCR results might vary.
+    *   The script uses various text cleaning and normalization techniques. For very noisy images or complex layouts, OCR results might vary.
     *   The current logic for separating license plate numbers and provinces from a single OCR string is basic. If OCR merges them without clear separators, extraction might be imperfect. This area may require further refinement based on specific image characteristics.
 *   **Incorrect Language Data:** If OCR results for Thai are poor, ensure the Thai language pack (`tha.traineddata`) for Tesseract is correctly installed and accessible.

@@ -59,19 +59,31 @@ def clean_text(text: str) -> str:
 def normalize_license_plate_number(text: str) -> str:
     """
     Normalizes extracted text to a standard license plate number format.
-    Example: Keeps alphanumeric characters, potentially formats to XX-XXXX.
-    This is a basic version and might need enhancement based on actual OCR output.
+    Converts hyphens to commas, removes extra spaces, and converts to uppercase.
+    Example: '740-699' becomes '740,699'. ' 74 - 699 ' becomes '74,699'.
     """
     if not isinstance(text, str):
         return ""
 
-    # Remove spaces and hyphens first
-    cleaned_text = re.sub(r'[\s\-]', '', text)
+    # Convert to uppercase first for consistent processing
+    processed_text = text.upper()
+    # Replace hyphens with commas
+    processed_text = processed_text.replace('-', ',')
 
-    # Further specific cleaning for license plates if needed (e.g., remove special chars not part of plates)
-    # For now, just return the cleaned alphanumeric string in uppercase
-    # This function will primarily be used for the license_plate_number part
-    return cleaned_text.upper()
+    # Remove spaces around commas and ensure single comma.
+    # This regex removes spaces around commas and reduces multiple commas to one.
+    processed_text = re.sub(r'\s*,\s*', ',', processed_text)
+    processed_text = re.sub(r',+', ',', processed_text) # Ensure single comma if multiple resulted
+
+    # Remove all other spaces (e.g. within number blocks if any like "123 45")
+    # This might be too aggressive if internal spaces in number blocks are possible and significant.
+    # The examples "740,699" and "74,699" suggest numbers are contiguous.
+    # So, removing all remaining spaces from parts might be okay.
+    parts = processed_text.split(',')
+    parts = [re.sub(r'\s+', '', part) for part in parts]
+    final_text = ','.join(parts)
+
+    return final_text.strip() # Final strip just in case
 
 def extract_license_plate_province(text: str, thai_provinces: list = None) -> str:
     """
@@ -160,8 +172,12 @@ def process_row_wrapper(args):
     container_number_col = config['container_number_col']
     license_plate_number_col = config['license_plate_number_col']
     license_plate_province_col = config['license_plate_province_col']
-    container_image_path_col = config['container_image_path_col']
-    plate_image_path_col = config['plate_image_path_col']
+    # New specific container image columns
+    # left_camera_image_file_col = config['left_camera_image_file_col'] # Will be used in next step
+    # right_camera_image_file_col = config['right_camera_image_file_col'] # Will be used in next step
+    # top_camera_image_file_col = config['top_camera_image_file_col'] # Will be used in next step
+    license_plate_image_file_col = config['license_plate_image_file_col'] # Updated name
+
     corrected_container_col = config['corrected_container_col']
     corrected_plate_number_col = config['corrected_plate_number_col']
     corrected_plate_province_col = config['corrected_plate_province_col']
@@ -176,25 +192,65 @@ def process_row_wrapper(args):
         corrected_plate_province_col: ''
     }
 
-    # 1. Container Number Verification
-    container_img_path = str(row_data.get(container_image_path_col, '')).strip()
-    excel_container_num = str(row_data.get(container_number_col, '')).strip()
+    # 1. Container Number Verification (NEW MULTI-IMAGE LOGIC)
+    excel_container_num_raw = str(row_data.get(config['container_number_col'], '')).strip()
 
-    if not container_img_path or not os.path.exists(container_img_path):
-        row_results[corrected_container_col] = '--'
+    # These are the actual column names from the Excel header, e.g., "left_camera_image_file"
+    container_image_cols_in_order = [
+        config['left_camera_image_file_col'],
+        config['right_camera_image_file_col'],
+        config['top_camera_image_file_col']
+    ]
+
+    ocr_container_text_found = None
+    any_image_exists = False
+    all_found_images_unreadable = True # Assume initially true if images are found
+
+    actual_image_paths_to_check = []
+    for col_data_key in container_image_cols_in_order:
+        path = str(row_data.get(col_data_key, '')).strip()
+        if path: # Only consider non-empty paths from Excel
+            actual_image_paths_to_check.append(path)
+
+    if not actual_image_paths_to_check: # No paths provided in any of the designated columns
+        row_results[config['corrected_container_col']] = '--'
     else:
-        ocr_container_text = perform_ocr(container_img_path, lang='eng')
-        if ocr_container_text is None or ocr_container_text == "":
-            row_results[corrected_container_col] = '-'
-        else:
-            cleaned_excel_container = clean_text(excel_container_num)
-            cleaned_ocr_container = clean_text(ocr_container_text)
+        for image_path in actual_image_paths_to_check:
+            if image_path and os.path.exists(image_path):
+                any_image_exists = True # At least one listed path points to an existing file
+                ocr_text = perform_ocr(image_path, lang='eng')
+                if ocr_text: # Check if ocr_text is not None and not empty
+                    ocr_container_text_found = ocr_text
+                    all_found_images_unreadable = False # We found a readable one
+                    break # Found a readable image, use this one
+                # If ocr_text is None or empty, this image was unreadable. Loop continues.
+            # If path is empty or file doesn't exist, it's skipped here.
+
+        if not any_image_exists: # None of the provided paths (even if non-empty) led to an actual file
+            row_results[config['corrected_container_col']] = '--'
+        elif all_found_images_unreadable: # Images existed, but none were readable by OCR
+            row_results[config['corrected_container_col']] = '-'
+        elif ocr_container_text_found is not None: # A readable image was found and OCR text extracted
+            cleaned_excel_container = clean_text(excel_container_num_raw)
+            cleaned_ocr_container = clean_text(ocr_container_text_found)
             if cleaned_excel_container != cleaned_ocr_container:
-                row_results[corrected_container_col] = cleaned_ocr_container
-            # else: stays blank (already initialized)
+                row_results[config['corrected_container_col']] = cleaned_ocr_container
+            else:
+                row_results[config['corrected_container_col']] = '' # Match, leave blank
+        else:
+            # This case implies any_image_exists was true, but all_found_images_unreadable was false,
+            # yet ocr_container_text_found is None. This can happen if an image path exists,
+            # but perform_ocr returns None (FileNotFound inside perform_ocr, though pre-checked here)
+            # or returns "" (empty string for other OCR errors).
+            # If an image existed but OCR yielded no usable text from any image.
+            row_results[config['corrected_container_col']] = '-'
+            # Add a print for debugging this unexpected state, if it occurs.
+            # Using row_data.name (if available, typically DataFrame index) or a placeholder for row identification.
+            row_identifier = row_data.name if hasattr(row_data, 'name') else f"Index_{index}"
+            print(f"Warning: Row {row_identifier} entered unexpected state in container processing. Check image readability or paths.")
 
     # 2. License Plate Number and Province Verification
-    plate_img_path = str(row_data.get(plate_image_path_col, '')).strip()
+    plate_img_path = str(row_data.get(license_plate_image_file_col, '')).strip() # Use new key
     excel_lp_num = str(row_data.get(license_plate_number_col, '')).strip()
     excel_lp_prov = str(row_data.get(license_plate_province_col, '')).strip()
 
@@ -208,11 +264,27 @@ def process_row_wrapper(args):
             row_results[corrected_plate_province_col] = '-'
         else:
             # License Plate Number
-            normalized_excel_lp_num = normalize_license_plate_number(excel_lp_num)
-            normalized_ocr_lp_num = normalize_license_plate_number(ocr_plate_text) # Simplified
-            if normalized_excel_lp_num != normalized_ocr_lp_num:
-                row_results[corrected_plate_number_col] = normalized_ocr_lp_num
-            # else: stays blank
+            excel_lp_num_raw = str(row_data.get(config['license_plate_number_col'], '')).strip()
+            # For comparison, remove all separators from Excel data and convert to uppercase
+            comp_excel_lp = re.sub(r'[^A-Z0-9]', '', excel_lp_num_raw.upper())
+
+            # Assuming ocr_plate_text contains the text for the license plate.
+            # This might need refinement if ocr_plate_text also contains province and needs splitting first.
+            # For now, assume ocr_plate_text is primarily the license plate number or can be processed as such.
+            raw_ocr_lp_text_from_image = ocr_plate_text # This is the text from perform_ocr for the plate image
+
+            # For comparison, remove all separators from raw OCR data and convert to uppercase
+            comp_ocr_lp = re.sub(r'[^A-Z0-9]', '', raw_ocr_lp_text_from_image.upper())
+
+            # Format the OCR output according to the new rule (hyphen to comma, etc.) for storing if different
+            formatted_ocr_lp_for_output = normalize_license_plate_number(raw_ocr_lp_text_from_image)
+
+            if comp_excel_lp != comp_ocr_lp:
+                # If they don't match after stripping all separators, store the comma-formatted OCR version
+                row_results[config['corrected_plate_number_col']] = formatted_ocr_lp_for_output
+            else:
+                # If they match after stripping all separators, leave blank
+                row_results[config['corrected_plate_number_col']] = ''
 
             # License Plate Province
             cleaned_excel_lp_prov = clean_text(excel_lp_prov)
@@ -234,14 +306,17 @@ def process_data(excel_file_path: str, output_excel_path: str) -> None:
         'container_number_col': 'container_number',
         'license_plate_number_col': 'license_plate_number',
         'license_plate_province_col': 'license_plate_province',
-        'container_image_path_col': 'container_image_path',
-        'plate_image_path_col': 'plate_image_path',
+
+        # New image column names
+        'left_camera_image_file_col': 'left_camera_image_file',
+        'right_camera_image_file_col': 'right_camera_image_file',
+        'top_camera_image_file_col': 'top_camera_image_file',
+        'license_plate_image_file_col': 'license_plate_image_file', # Renamed
+
         'corrected_container_col': 'corrected_container_number',
         'corrected_plate_number_col': 'corrected_license_plate_number',
         'corrected_plate_province_col': 'corrected_license_plate_province',
-        # Optional: Predefined list of Thai provinces for more accurate province extraction
-        # 'thai_provinces_list': ["กรุงเทพมหานคร", "ชลบุรี", "เชียงใหม่", ...]
-        'thai_provinces_list': None # Set to None if not used or provide a list
+        'thai_provinces_list': None
     }
     # --- End Configuration ---
 
@@ -277,7 +352,7 @@ def process_data(excel_file_path: str, output_excel_path: str) -> None:
                 results.append(result)
             except Exception as exc:
                 row_index = future_to_row[future]
-                print(f'Row {row_index} generated an exception: {exc}')
+                print(f"WARNING: Processing failed for row index {row_index} due to an error: '{exc}'. This row's corrected fields may be incomplete. Please check console output for details if errors persist.")
                 # Optionally, mark these rows with an error status in the DataFrame
                 # For now, we just print the error and the row might not get its values updated correctly or at all
                 # depending on where the error occurred in process_row_wrapper.
@@ -337,19 +412,26 @@ if __name__ == '__main__':
         # --- Configuration: Column Names (Must match those in process_data and process_row_wrapper) ---
         # This needs to be consistent with how process_data expects them or pass them around.
         # For simplicity, let's use the same default names here for the dummy file.
-        container_number_col = 'container_number'
-        license_plate_number_col = 'license_plate_number'
-        license_plate_province_col = 'license_plate_province'
-        container_image_path_col = 'container_image_path'
-        plate_image_path_col = 'plate_image_path'
+        # These should ideally align with the main config keys if used beyond dummy creation.
+        container_number_col_name = 'container_number' # Or fetch from a global config if defined
+        license_plate_number_col_name = 'license_plate_number'
+        license_plate_province_col_name = 'license_plate_province'
+
+        # New image path columns for dummy data
+        left_camera_col_name = 'left_camera_image_file'
+        right_camera_col_name = 'right_camera_image_file'
+        top_camera_col_name = 'top_camera_image_file'
+        license_plate_image_col_name = 'license_plate_image_file'
         # --- End Configuration ---
 
         dummy_data = {
-            container_number_col: ["CN123", "CN456"],
-            license_plate_number_col: ["AB1234", "CD5678"],
-            license_plate_province_col: ["ProvinceA", "ProvinceB"],
-            container_image_path_col: ["path/to/container1.jpg", "path/to/nonexistent_container.jpg"],
-            plate_image_path_col: ["path/to/plate1.jpg", "path/to/nonexistent_plate.jpg"]
+            container_number_col_name: ["CN123", "CN456"],
+            license_plate_number_col_name: ["AB1234", "CD5678"], # Will be updated later for new format
+            license_plate_province_col_name: ["ProvinceA", "ProvinceB"],
+            left_camera_col_name: ["path/to/left_container1.jpg", "path/to/nonexistent_left.jpg"],
+            right_camera_col_name: ["path/to/right_container1.jpg", "path/to/nonexistent_right.jpg"],
+            top_camera_col_name: ["path/to/top_container1.jpg", "path/to/nonexistent_top.jpg"],
+            license_plate_image_col_name: ["path/to/plate1.jpg", "path/to/nonexistent_plate.jpg"]
         }
         dummy_df = pd.DataFrame(dummy_data)
         try:
