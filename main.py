@@ -1,458 +1,498 @@
-# Main script for data verification
+import tkinter as tk
+from tkinter import font as tkFont
+from tkinter import messagebox
+from PIL import Image, ImageTk, ImageDraw, ImageFont
 import pandas as pd
-from PIL import Image
-import pytesseract
-import re # For cleaning and license plate normalization
 import os
-from tqdm import tqdm
-import concurrent.futures
-import multiprocessing # To get cpu_count
 import argparse
 
-# Placeholder for Tesseract command path if needed, can be configured by user
-# pytesseract.pytesseract.tesseract_cmd = r'/usr/bin/tesseract' # Example for Linux
-# pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe' # Example for Windows
+# --- 1. CONFIGURATION ---
+COLUMN_NAMES = {
+    "container": "container_number",
+    "corrected_container": "corrected_container_number",
+    "license_plate": "license_plate_number",
+    "corrected_license_plate": "corrected_license_plate_number",
+    "province": "license_plate_province",
+    "corrected_province": "corrected_license_plate_province",
+    "top_img": "top_camera_image_file",
+    "left_img": "left_camera_image_file",
+    "right_img": "right_camera_image_file",
+    "plate_img": "license_plate_image_file"
+}
 
-def load_excel_data(file_path: str) -> pd.DataFrame | None:
-    """Loads data from an Excel file into a pandas DataFrame."""
-    try:
-        df = pd.read_excel(file_path)
-        print(f"Successfully loaded Excel file: {file_path}")
-        return df
-    except FileNotFoundError:
-        print(f"Error: Excel file not found at {file_path}")
-        return None
-    except Exception as e:
-        print(f"Error loading Excel file {file_path}: {e}")
-        return None
+# --- 2. THE MAIN APPLICATION CLASS ---
+class VerificationApp(tk.Tk):
+    def __init__(self, excel_path):
+        super().__init__()
 
-def perform_ocr(image_path: str, lang: str = 'eng') -> str | None:
-    """Performs OCR on an image and returns the extracted text."""
-    try:
-        img = Image.open(image_path)
-        text = pytesseract.image_to_string(img, lang=lang)
-        # print(f"OCR successful for {image_path} with lang {lang}. Text: '{text[:50]}...'") # Optional: for verbose logging
-        return text.strip()
-    except FileNotFoundError:
-        # This case will be handled by checking os.path.exists before calling perform_ocr
-        # print(f"Error: Image file not found at {image_path}")
-        return None # Should be caught by pre-check
-    except pytesseract.TesseractNotFoundError:
-        print("Error: Tesseract is not installed or not found in your PATH.")
-        print("Please install Tesseract OCR and ensure it's added to your system's PATH.")
-        # This is a critical error, might need to halt execution or alert user more strongly.
-        # For now, we'll let it propagate or be handled by the main loop.
-        raise
-    except Exception as e:
-        print(f"Error during OCR for image {image_path}: {e}")
-        return "" # Return empty string for other OCR errors (e.g., unreadable image by Tesseract)
+        self.title("Manual Verification Helper v3.0 (Portable & Enhanced)")
+        self.geometry("1366x768")
+        self.configure(bg="#2E2E2E")
 
-def clean_text(text: str) -> str:
-    """Cleans text by removing common unwanted characters like spaces and hyphens."""
-    if not isinstance(text, str):
-        return ""
-    # Remove spaces, hyphens, and common OCR noise.
-    # This can be expanded based on observed OCR output.
-    cleaned_text = re.sub(r'[\s\-_]', '', text)
-    return cleaned_text.upper() # Standardize to uppercase for comparison
+        self.input_file_path = excel_path
+        self.base_dir = os.path.dirname(os.path.abspath(excel_path))
+        self.output_file_path = self.generate_output_filename(excel_path)
 
-def normalize_license_plate_number(text: str) -> str:
-    """
-    Normalizes extracted text to a standard license plate number format.
-    Converts hyphens to commas, removes extra spaces, and converts to uppercase.
-    Example: '740-699' becomes '740,699'. ' 74 - 699 ' becomes '74,699'.
-    """
-    if not isinstance(text, str):
-        return ""
+        self.df = None
+        self.load_data()
 
-    # Convert to uppercase first for consistent processing
-    processed_text = text.upper()
-    # Replace hyphens with commas
-    processed_text = processed_text.replace('-', ',')
+        if self.df is None:
+            self.destroy()
+            return
 
-    # Remove spaces around commas and ensure single comma.
-    # This regex removes spaces around commas and reduces multiple commas to one.
-    processed_text = re.sub(r'\s*,\s*', ',', processed_text)
-    processed_text = re.sub(r',+', ',', processed_text) # Ensure single comma if multiple resulted
+        self.total_records = len(self.df)
+        self.current_index = self.find_first_unprocessed_row()
+        self.corrections = self.load_existing_corrections()
 
-    # Remove all other spaces (e.g. within number blocks if any like "123 45")
-    # This might be too aggressive if internal spaces in number blocks are possible and significant.
-    # The examples "740,699" and "74,699" suggest numbers are contiguous.
-    # So, removing all remaining spaces from parts might be okay.
-    parts = processed_text.split(',')
-    parts = [re.sub(r'\s+', '', part) for part in parts]
-    final_text = ','.join(parts)
+        self.setup_styles()
+        self.create_widgets()
+        self.load_record(self.current_index)
 
-    return final_text.strip() # Final strip just in case
+        self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
-def extract_license_plate_province(text: str, thai_provinces: list = None) -> str:
-    """
-    Extracts province name from OCR text.
-    This is a placeholder. Actual implementation might need a list of Thai provinces
-    or more sophisticated NLP techniques if province is mixed with other text.
-    For now, it assumes the province might be part of a larger text block and tries basic cleaning.
-    The 'tha+eng' OCR should help in direct extraction if formatted well on the plate.
-    """
-    if not isinstance(text, str):
-        return ""
+    def generate_output_filename(self, input_path):
+        name, ext = os.path.splitext(input_path)
+        if name.endswith("_corrected"):
+            return input_path
+        return f"{name}_corrected{ext}"
 
-    # Basic cleaning: remove digits, spaces, hyphens, and convert to uppercase.
-    # This is a very naive approach. A better method would be to use a predefined list
-    # of provinces and find the best match, or use NLP if text is complex.
-    # For now, we assume the OCR for province is relatively clean.
-    cleaned_province = re.sub(r'[\d\s\-]', '', text) # Remove digits, spaces, hyphens
+    def load_data(self):
+        file_to_load = self.input_file_path
+        use_resume_file = False
+        if os.path.exists(self.output_file_path):
+            if messagebox.askyesno("Resume Session",
+                                   f"Found previous work in '{os.path.basename(self.output_file_path)}'.\n\nDo you want to resume from where you left off?"):
+                file_to_load = self.output_file_path
+                use_resume_file = True
 
-    # If a list of known provinces is provided, try to find a match
-    # This is a more robust approach but requires a list of provinces.
-    if thai_provinces:
-        # Simple matching (case-insensitive, space-insensitive)
-        # This is a basic example; more sophisticated matching might be needed
-        normalized_text = clean_text(text) # Use general clean_text for matching
-        for province in thai_provinces:
-            if clean_text(province) in normalized_text:
-                return province
-        # If no direct match, return the cleaned text as a fallback
-        # This might not be ideal if there's a lot of noise.
-        return cleaned_province.upper()
+        try:
+            dtype_map = {col: str for col in COLUMN_NAMES.values()}
+            self.df = pd.read_excel(file_to_load, dtype=dtype_map)
+            self.df.columns = self.df.columns.str.strip()
 
-    return cleaned_province.upper() # Fallback to basic cleaned text
+            if not use_resume_file:
+                 for col_type in ['corrected_container', 'corrected_license_plate', 'corrected_province']:
+                    col_name = COLUMN_NAMES[col_type]
+                    if col_name not in self.df.columns:
+                        self.df[col_name] = ""
 
-# Example usage (will be removed or commented out later):
-# if __name__ == '__main__':
-#     # Test load_excel_data (requires a dummy_test.xlsx file)
-#     # df_test = load_excel_data('dummy_test.xlsx')
-#     # if df_test is not None:
-#     #     print(df_test.head())
+            self.df = self.df.fillna('')
 
-#     # Test clean_text
-#     print(f"Cleaned 'AB CD-123': {clean_text('AB CD-123')}")
-#     print(f"Cleaned '  กรุงเทพมหานคร  ': {clean_text('  กรุงเทพมหานคร  ')}")
+        except FileNotFoundError:
+            messagebox.showerror("Error", f"Input file not found:\n{file_to_load}")
+            self.df = None
+        except Exception as e:
+            messagebox.showerror("Error", f"Could not read Excel file. Error:\n{e}")
+            self.df = None
 
-#     # Test normalize_license_plate_number
-#     print(f"Normalized LP 'BC-1234': {normalize_license_plate_number('BC-1234')}")
-#     print(f"Normalized LP '1กข 5678': {normalize_license_plate_number('1กข 5678')}")
+    def find_first_unprocessed_row(self):
+        corr_cols = [
+            COLUMN_NAMES['corrected_container'],
+            COLUMN_NAMES['corrected_license_plate'],
+            COLUMN_NAMES['corrected_province']
+        ]
+        # Ensure columns exist before trying to filter on them
+        for col in corr_cols:
+            if col not in self.df.columns:
+                # If a correction column is missing entirely, it implies no records are processed for it.
+                # This could happen if loading an original file that never had these columns.
+                # The load_data method tries to add them if not use_resume_file.
+                # If they are still missing, it's safer to start from 0.
+                return 0
 
-#     # Test extract_license_plate_province (basic)
-#     print(f"Extracted Province 'กรุงเทพมหานคร 123': {extract_license_plate_province('กรุงเทพมหานคร 123')}")
-#     # Test with a hypothetical list of provinces
-#     # sample_provinces = ["กรุงเทพมหานคร", "ชลบุรี", "เชียงใหม่"]
-#     # print(f"Extracted Province 'Vehicle Plate Chiang Mai NB': {extract_license_plate_province('Vehicle Plate Chiang Mai NB', sample_provinces)}")
-#     # print(f"Extracted Province 'รถสวย ชลบุรี': {extract_license_plate_province('รถสวย ชลบุรี', sample_provinces)}")
+        # Proceed only if all expected correction columns are present
+        unprocessed_conditions = []
+        for col in corr_cols:
+            unprocessed_conditions.append(self.df[col] == '')
+
+        if not unprocessed_conditions: # Should not happen if corr_cols is not empty
+            return 0
+
+        # Combine conditions using logical AND
+        combined_condition = unprocessed_conditions[0]
+        for cond in unprocessed_conditions[1:]:
+            combined_condition &= cond
+
+        unprocessed = self.df[combined_condition]
+
+        if not unprocessed.empty:
+            return unprocessed.index[0]
+        return 0 # Default to 0 if all records are processed or if df is empty
+
+    def load_existing_corrections(self):
+        corrections = {}
+        # Define keys for correction data to check if they exist in the DataFrame
+        correction_keys_to_check = [
+            COLUMN_NAMES['corrected_container'],
+            COLUMN_NAMES['corrected_license_plate'],
+            COLUMN_NAMES['corrected_province']
+        ]
+
+        for index, row in self.df.iterrows():
+            # Ensure all correction columns exist in the row before trying to access them
+            # This guards against errors if the DataFrame schema is unexpected
+            if not all(key in row for key in correction_keys_to_check):
+                # If essential correction columns are missing, skip this row for corrections loading
+                # or handle as an error/default state. For now, skipping.
+                continue
+
+            correction_data = {
+                'container': row.get(COLUMN_NAMES['corrected_container'], ''),
+                'license_plate': row.get(COLUMN_NAMES['corrected_license_plate'], ''),
+                'province': row.get(COLUMN_NAMES['corrected_province'], '')
+            }
+            if any(val for val in correction_data.values() if val): # Check if any value is non-empty
+                 corrections[index] = correction_data
+        return corrections
+
+    def setup_styles(self):
+        self.header_font = tkFont.Font(family="Segoe UI", size=16, weight="bold")
+        self.label_font = tkFont.Font(family="Segoe UI", size=11)
+        self.data_font = tkFont.Font(family="Segoe UI", size=12, weight="bold")
+        self.entry_font = tkFont.Font(family="Consolas", size=12)
+        self.button_font = tkFont.Font(family="Segoe UI", size=11, weight="bold")
+        self.small_font = tkFont.Font(family="Segoe UI", size=9)
+        self.copy_btn_font = tkFont.Font(family="Segoe UI", size=11)
+
+    def create_widgets(self):
+        self.grid_rowconfigure(1, weight=1)
+        self.grid_columnconfigure(0, weight=1)
+
+        self.progress_label = tk.Label(self, text="", font=self.header_font, fg="white", bg="#2E2E2E", pady=10)
+        self.progress_label.grid(row=0, column=0, sticky="ew")
+        content_frame = tk.Frame(self, bg="#2E2E2E")
+        content_frame.grid(row=1, column=0, sticky="nsew", padx=20, pady=10)
+        content_frame.grid_columnconfigure(1, weight=1) # Allow image frame to expand
+        data_frame = tk.Frame(content_frame, bg="#2E2E2E", width=400) # Fixed width for data
+        data_frame.grid(row=0, column=0, sticky="ns", padx=(0, 20))
+        data_frame.grid_propagate(False) # Prevent data_frame from shrinking/growing with content
+        image_frame = tk.Frame(content_frame, bg="#2E2E2E")
+        image_frame.grid(row=0, column=1, sticky="nsew")
+
+        self.create_data_section(data_frame)
+        self.create_image_section(image_frame)
+        self.create_navigation_section()
+
+    def create_data_section(self, parent):
+        self.data_labels = {}
+        self.entry_boxes = {}
+        fields = ["container", "license_plate", "province"]
+        field_titles = ["Container Number", "License Plate Number", "License Plate Province"]
+
+        for i, (field, title) in enumerate(zip(fields, field_titles)):
+            frame = tk.Frame(parent, bg="#3c3c3c", bd=1, relief=tk.SOLID)
+            frame.pack(fill=tk.X, pady=10, anchor="n") # Use pack for vertical layout
+
+            tk.Label(frame, text=f"Original {title}:", font=self.label_font, fg="#B0B0B0", bg="#3c3c3c").pack(anchor="w", padx=10, pady=(5,0))
+
+            original_frame = tk.Frame(frame, bg="#3c3c3c")
+            original_frame.pack(fill=tk.X, padx=10, pady=(0, 5)) # Reduced bottom padding
+            data_label = tk.Label(original_frame, text="N/A", font=self.data_font, fg="white", bg="#3c3c3c", wraplength=320, justify=tk.LEFT) # Adjusted wraplength
+            data_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
+            self.data_labels[field] = data_label
+
+            copy_button = tk.Button(original_frame, text="📋", font=self.copy_btn_font, command=lambda f=field: self.copy_to_entry(f), relief=tk.FLAT, bg="#3c3c3c", fg="white", activebackground="#555555", width=2)
+            copy_button.pack(side=tk.RIGHT, padx=(0,5)) # Align to right, add padding
+
+            tk.Label(frame, text=f"Enter Correction:", font=self.label_font, fg="#B0B0B0", bg="#3c3c3c").pack(anchor="w", padx=10, pady=(5,0))
+            entry = tk.Entry(frame, font=self.entry_font, bg="#2E2E2E", fg="white", insertbackground="white", relief=tk.FLAT, width=38) # Adjusted width
+            entry.pack(anchor="w", padx=10, pady=(0,10), ipady=4)
+            self.entry_boxes[field] = entry
+
+        quick_fill_frame = tk.Frame(parent, bg="#3c3c3c", bd=1, relief=tk.SOLID)
+        quick_fill_frame.pack(fill=tk.X, pady=5, anchor="n")
+        btn_style = {'font': self.small_font, 'relief': tk.FLAT, 'fg': 'white', 'activebackground': '#555', 'pady': 2, 'padx':5}
+        tk.Label(quick_fill_frame, text="Quick Actions:", font=self.label_font, fg="#B0B0B0", bg="#3c3c3c").pack(side=tk.LEFT, padx=10)
+        tk.Button(quick_fill_frame, text="Mark Illegible (-)", bg="#795548", command=lambda: self.quick_fill('-'), **btn_style).pack(side=tk.LEFT, padx=3)
+        tk.Button(quick_fill_frame, text="Mark Missing (--)", bg="#f44336", command=lambda: self.quick_fill('--'), **btn_style).pack(side=tk.LEFT, padx=3)
+
+    def copy_to_entry(self, field):
+        original_text = self.data_labels[field].cget("text")
+        if original_text != "N/A" and original_text: # Ensure not empty
+            self.entry_boxes[field].delete(0, tk.END)
+            self.entry_boxes[field].insert(0, original_text)
+
+    def quick_fill(self, symbol):
+        # Only fill license plate and province with quick fill for now
+        if 'license_plate' in self.entry_boxes:
+            self.entry_boxes['license_plate'].delete(0, tk.END)
+            self.entry_boxes['license_plate'].insert(0, symbol)
+        if 'province' in self.entry_boxes:
+            self.entry_boxes['province'].delete(0, tk.END)
+            self.entry_boxes['province'].insert(0, symbol)
+        # Optionally, fill container too or make it selective
+        # self.entry_boxes['container'].delete(0, tk.END)
+        # self.entry_boxes['container'].insert(0, symbol)
 
 
-#     # Test perform_ocr (requires an image file, e.g., 'test_image.png' and Tesseract installed)
-#     # Create a dummy image file for testing if you don't have one
-#     # from PIL import Image, ImageDraw, ImageFont
-#     # try:
-#     #     img = Image.new('RGB', (400, 100), color = (255, 255, 255))
-#     #     d = ImageDraw.Draw(img)
-#     #     # Specify a font file that supports Thai characters if testing Thai OCR
-#     #     # font = ImageFont.truetype("arial.ttf", 30) # Example, use a Thai font for Thai text
-#     #     d.text((10,10), "HELLO WORLD 123", fill=(0,0,0)) #, font=font
-#     #     img.save("test_ocr_image.png")
-#     #     print(f"OCR from test_ocr_image.png: {perform_ocr('test_ocr_image.png', lang='eng')}")
-#     # except ImportError:
-#     #     print("Pillow is not installed. Skipping dummy image creation for OCR test.")
-#     # except pytesseract.TesseractNotFoundError:
-#     #     print("Tesseract not found. Skipping OCR test.")
-#     # except Exception as e:
-#     #     print(f"Error creating dummy image or running OCR test: {e}")
+    def create_image_section(self, parent):
+        self.image_labels = {}
+        image_keys = ["top_img", "left_img", "right_img", "plate_img"]
+        for i, key in enumerate(image_keys):
+            row, col = divmod(i, 2)
+            frame = tk.Frame(parent, bg="#2E2E2E", bd=1, relief=tk.SOLID) # Added border for clarity
+            frame.grid(row=row, column=col, sticky="nsew", padx=5, pady=5)
+            parent.grid_rowconfigure(row, weight=1)
+            parent.grid_columnconfigure(col, weight=1)
+            img_label = tk.Label(frame, bg="#2E2E2E") # Darker background for image area
+            img_label.pack(fill=tk.BOTH, expand=True)
+            self.image_labels[key] = img_label
 
-def process_row_wrapper(args):
-    """
-    Wrapper function to process a single row.
-    Takes a tuple of arguments: (index, row_data, config)
-    row_data should be a pandas Series or a dictionary.
-    config should be a dictionary containing column names and other necessary parameters.
-    Returns a dictionary with index and the corrected values.
-    """
-    index, row_data, config = args
+    def create_navigation_section(self):
+        nav_frame = tk.Frame(self, bg="#2E2E2E", pady=10)
+        nav_frame.grid(row=2, column=0, sticky="ew", padx=20)
 
-    # Unpack config
-    container_number_col = config['container_number_col']
-    license_plate_number_col = config['license_plate_number_col']
-    license_plate_province_col = config['license_plate_province_col']
-    # New specific container image columns
-    # left_camera_image_file_col = config['left_camera_image_file_col'] # Will be used in next step
-    # right_camera_image_file_col = config['right_camera_image_file_col'] # Will be used in next step
-    # top_camera_image_file_col = config['top_camera_image_file_col'] # Will be used in next step
-    license_plate_image_file_col = config['license_plate_image_file_col'] # Updated name
+        self.back_button = tk.Button(nav_frame, text="<< Go Back", command=self.prev_record_event, bg="#555555", font=self.button_font, fg="white", relief=tk.FLAT, padx=10, pady=5)
+        self.back_button.pack(side=tk.LEFT, padx=(0,10))
 
-    corrected_container_col = config['corrected_container_col']
-    corrected_plate_number_col = config['corrected_plate_number_col']
-    corrected_plate_province_col = config['corrected_plate_province_col']
-    thai_provinces_list = config['thai_provinces_list']
+        goto_frame = tk.Frame(nav_frame, bg="#2E2E2E")
+        goto_frame.pack(side=tk.LEFT, expand=True, fill=tk.X, anchor="center") # Center the goto section
 
-    # Initialize results for this row
-    # Must match the keys used when updating the DataFrame later
-    row_results = {
-        'index': index,
-        corrected_container_col: '',
-        corrected_plate_number_col: '',
-        corrected_plate_province_col: ''
-    }
+        tk.Label(goto_frame, text="Go to Record:", font=self.small_font, fg="#B0B0B0", bg="#2E2E2E").pack(side=tk.LEFT, padx=(0, 5))
+        self.goto_entry = tk.Entry(goto_frame, font=self.entry_font, bg="#4F4F4F", fg="white", relief=tk.FLAT, width=8, justify='center')
+        self.goto_entry.pack(side=tk.LEFT, ipady=2)
+        self.goto_entry.bind('<Return>', self.goto_record_event)
+        goto_button = tk.Button(goto_frame, text="Go", command=self.goto_record_event, bg="#4A90E2", font=self.button_font, fg="white", relief=tk.FLAT, padx=10, pady=5)
+        goto_button.pack(side=tk.LEFT, padx=5)
 
-    # 1. Container Number Verification (NEW MULTI-IMAGE LOGIC)
-    excel_container_num_raw = str(row_data.get(config['container_number_col'], '')).strip()
+        right_nav_frame = tk.Frame(nav_frame, bg="#2E2E2E") # Frame to hold next button and label
+        right_nav_frame.pack(side=tk.RIGHT, padx=(10,0))
+        self.next_button = tk.Button(right_nav_frame, text="Save and Next >>", command=self.next_record_event, bg="#4CAF50", font=self.button_font, fg="white", relief=tk.FLAT, padx=10, pady=5)
+        self.next_button.pack(side=tk.LEFT)
+        tk.Label(right_nav_frame, text="(Press Enter)", font=self.small_font, fg="#B0B0B0", bg="#2E2E2E").pack(side=tk.LEFT, padx=(5,0))
 
-    # These are the actual column names from the Excel header, e.g., "left_camera_image_file"
-    container_image_cols_in_order = [
-        config['left_camera_image_file_col'],
-        config['right_camera_image_file_col'],
-        config['top_camera_image_file_col']
-    ]
+        self.bind('<Return>', self.next_record_event) # Global Enter key binding
 
-    ocr_container_text_found = None
-    any_image_exists = False
-    all_found_images_unreadable = True # Assume initially true if images are found
+    def load_record(self, index_to_load):
+        if not (0 <= index_to_load < self.total_records):
+            # print(f"Attempted to load invalid index: {index_to_load}")
+            return
 
-    actual_image_paths_to_check = []
-    for col_data_key in container_image_cols_in_order:
-        path = str(row_data.get(col_data_key, '')).strip()
-        if path: # Only consider non-empty paths from Excel
-            actual_image_paths_to_check.append(path)
+        self.current_index = index_to_load
+        self.progress_label.config(text=f"Record {self.current_index + 1} / {self.total_records}")
 
-    if not actual_image_paths_to_check: # No paths provided in any of the designated columns
-        row_results[config['corrected_container_col']] = '--'
-    else:
-        for image_path in actual_image_paths_to_check:
-            if image_path and os.path.exists(image_path):
-                any_image_exists = True # At least one listed path points to an existing file
-                ocr_text = perform_ocr(image_path, lang='eng')
-                if ocr_text: # Check if ocr_text is not None and not empty
-                    ocr_container_text_found = ocr_text
-                    all_found_images_unreadable = False # We found a readable one
-                    break # Found a readable image, use this one
-                # If ocr_text is None or empty, this image was unreadable. Loop continues.
-            # If path is empty or file doesn't exist, it's skipped here.
+        record = self.df.iloc[self.current_index]
 
-        if not any_image_exists: # None of the provided paths (even if non-empty) led to an actual file
-            row_results[config['corrected_container_col']] = '--'
-        elif all_found_images_unreadable: # Images existed, but none were readable by OCR
-            row_results[config['corrected_container_col']] = '-'
-        elif ocr_container_text_found is not None: # A readable image was found and OCR text extracted
-            cleaned_excel_container = clean_text(excel_container_num_raw)
-            cleaned_ocr_container = clean_text(ocr_container_text_found)
-            if cleaned_excel_container != cleaned_ocr_container:
-                row_results[config['corrected_container_col']] = cleaned_ocr_container
-            else:
-                row_results[config['corrected_container_col']] = '' # Match, leave blank
+        self.data_labels['container'].config(text=record.get(COLUMN_NAMES['container'], 'N/A') or 'N/A')
+        self.data_labels['license_plate'].config(text=record.get(COLUMN_NAMES['license_plate'], 'N/A') or 'N/A')
+        self.data_labels['province'].config(text=record.get(COLUMN_NAMES['province'], 'N/A') or 'N/A')
+
+        saved_correction = self.corrections.get(self.current_index, {})
+
+        self.entry_boxes['container'].delete(0, tk.END)
+        self.entry_boxes['container'].insert(0, saved_correction.get('container', ''))
+
+        # --- MODIFIED LOGIC FOR LICENSE PLATE AND PROVINCE ---
+        plate_image_path_from_excel = record.get(COLUMN_NAMES['plate_img'])
+        plate_image_exists = False
+        if plate_image_path_from_excel and not pd.isna(plate_image_path_from_excel) and str(plate_image_path_from_excel).strip():
+            plate_image_full_path = os.path.join(self.base_dir, str(plate_image_path_from_excel).strip())
+            if os.path.exists(plate_image_full_path):
+                plate_image_exists = True
+
+        current_lp_correction = saved_correction.get('license_plate', '')
+        self.entry_boxes['license_plate'].delete(0, tk.END)
+        if not plate_image_exists and not current_lp_correction:
+            self.entry_boxes['license_plate'].insert(0, "--")
         else:
-            # This case implies any_image_exists was true, but all_found_images_unreadable was false,
-            # yet ocr_container_text_found is None. This can happen if an image path exists,
-            # but perform_ocr returns None (FileNotFound inside perform_ocr, though pre-checked here)
-            # or returns "" (empty string for other OCR errors).
-            # If an image existed but OCR yielded no usable text from any image.
-            row_results[config['corrected_container_col']] = '-'
-            # Add a print for debugging this unexpected state, if it occurs.
-            # Using row_data.name (if available, typically DataFrame index) or a placeholder for row identification.
-            row_identifier = row_data.name if hasattr(row_data, 'name') else f"Index_{index}"
-            print(f"Warning: Row {row_identifier} entered unexpected state in container processing. Check image readability or paths.")
+            self.entry_boxes['license_plate'].insert(0, current_lp_correction)
 
-    # 2. License Plate Number and Province Verification
-    plate_img_path = str(row_data.get(license_plate_image_file_col, '')).strip() # Use new key
-    excel_lp_num = str(row_data.get(license_plate_number_col, '')).strip()
-    excel_lp_prov = str(row_data.get(license_plate_province_col, '')).strip()
-
-    if not plate_img_path or not os.path.exists(plate_img_path):
-        row_results[corrected_plate_number_col] = '--'
-        row_results[corrected_plate_province_col] = '--'
-    else:
-        ocr_plate_text = perform_ocr(plate_img_path, lang='tha+eng')
-        if ocr_plate_text is None or ocr_plate_text == "":
-            row_results[corrected_plate_number_col] = '-'
-            row_results[corrected_plate_province_col] = '-'
+        current_prov_correction = saved_correction.get('province', '')
+        self.entry_boxes['province'].delete(0, tk.END)
+        if not plate_image_exists and not current_prov_correction:
+            self.entry_boxes['province'].insert(0, "--")
         else:
-            # License Plate Number
-            excel_lp_num_raw = str(row_data.get(config['license_plate_number_col'], '')).strip()
-            # For comparison, remove all separators from Excel data and convert to uppercase
-            comp_excel_lp = re.sub(r'[^A-Z0-9]', '', excel_lp_num_raw.upper())
+            self.entry_boxes['province'].insert(0, current_prov_correction)
+        # --- END OF MODIFIED LOGIC ---
 
-            # Assuming ocr_plate_text contains the text for the license plate.
-            # This might need refinement if ocr_plate_text also contains province and needs splitting first.
-            # For now, assume ocr_plate_text is primarily the license plate number or can be processed as such.
-            raw_ocr_lp_text_from_image = ocr_plate_text # This is the text from perform_ocr for the plate image
+        for key, label in self.image_labels.items():
+            path_from_excel = record.get(COLUMN_NAMES[key])
+            self.display_image(label, path_from_excel)
 
-            # For comparison, remove all separators from raw OCR data and convert to uppercase
-            comp_ocr_lp = re.sub(r'[^A-Z0-9]', '', raw_ocr_lp_text_from_image.upper())
+        self.back_button.config(state=tk.NORMAL if self.current_index > 0 else tk.DISABLED)
+        self.next_button.config(text="Save and Next >>" if self.current_index < self.total_records - 1 else "Save and Finish")
 
-            # Format the OCR output according to the new rule (hyphen to comma, etc.) for storing if different
-            formatted_ocr_lp_for_output = normalize_license_plate_number(raw_ocr_lp_text_from_image)
+        if 'container' in self.entry_boxes: # Ensure focus target exists
+            self.entry_boxes['container'].focus_set()
 
-            if comp_excel_lp != comp_ocr_lp:
-                # If they don't match after stripping all separators, store the comma-formatted OCR version
-                row_results[config['corrected_plate_number_col']] = formatted_ocr_lp_for_output
+    def save_current_record(self):
+        if self.current_index is None or not (0 <= self.current_index < self.total_records):
+            return # No valid record to save
+
+        self.corrections[self.current_index] = {
+            'container': self.entry_boxes['container'].get(),
+            'license_plate': self.entry_boxes['license_plate'].get(),
+            'province': self.entry_boxes['province'].get()
+        }
+
+    def next_record_event(self, event=None):
+        self.save_current_record()
+        if self.current_index + 1 < self.total_records:
+            self.load_record(self.current_index + 1)
+        else:
+            # If on the last record, ask_confirmation should ideally be False if "Save and Finish" implies auto-save.
+            # However, current on_closing always asks if True by default.
+            # For "Save and Finish", we want to save and exit without re-asking.
+            self.on_closing(ask_confirmation=False)
+
+
+    def prev_record_event(self):
+        if self.current_index > 0:
+            self.save_current_record() # Save before moving
+            self.load_record(self.current_index - 1)
+
+    def goto_record_event(self, event=None):
+        try:
+            target_record_str = self.goto_entry.get()
+            if not target_record_str: # Handle empty input
+                messagebox.showwarning("Invalid Input", "Please enter a record number.")
+                return
+            target_record = int(target_record_str)
+            target_index = target_record - 1
+            if 0 <= target_index < self.total_records:
+                self.save_current_record() # Save before jumping
+                self.load_record(target_index)
             else:
-                # If they match after stripping all separators, leave blank
-                row_results[config['corrected_plate_number_col']] = ''
+                messagebox.showwarning("Invalid Record", f"Please enter a number between 1 and {self.total_records}.")
+        except ValueError: # Catch if int() conversion fails
+            messagebox.showwarning("Invalid Input", "Please enter a valid number.")
+        finally:
+            self.goto_entry.delete(0, tk.END)
 
-            # License Plate Province
-            cleaned_excel_lp_prov = clean_text(excel_lp_prov)
-            extracted_ocr_lp_prov = extract_license_plate_province(ocr_plate_text, thai_provinces_list)
-            if cleaned_excel_lp_prov != extracted_ocr_lp_prov:
-                row_results[corrected_plate_province_col] = extracted_ocr_lp_prov
-            # else: stays blank
+    def display_image(self, label, path_from_excel):
+        target_width, target_height = label.master.winfo_width() -10, label.master.winfo_height() -10 # Use label frame size
+        if target_width < 50 or target_height < 50 : # Fallback if frame size not determined yet
+            target_width, target_height = 450,300
 
-    return row_results
 
-def process_data(excel_file_path: str, output_excel_path: str) -> None:
-    """
-    Main function to process the Excel data, verify against images, and save the output.
-    Uses multiprocessing for faster OCR processing.
-    """
+        full_path = None
+        try:
+            img_to_display = None
+            if not path_from_excel or pd.isna(path_from_excel) or not str(path_from_excel).strip():
+                img_to_display = self.create_placeholder_image("No Path in Excel", target_width, target_height)
+            else:
+                full_path = os.path.join(self.base_dir, str(path_from_excel).strip())
+                if os.path.exists(full_path) and os.path.isfile(full_path):
+                    try:
+                        img = Image.open(full_path)
+                        img.thumbnail((target_width, target_height), Image.Resampling.LANCZOS)
+                        img_to_display = img
+                    except IOError: # Catch errors like "cannot identify image file"
+                         img_to_display = self.create_placeholder_image(f"Cannot open image:\n{os.path.basename(full_path)}", target_width, target_height)
+                else:
+                    img_to_display = self.create_placeholder_image(f"Image Not Found:\n{os.path.basename(full_path)}", target_width, target_height)
 
-    # --- Configuration: Column Names (Update these with actual column names from the Excel file) ---
-    config = {
-        'container_number_col': 'container_number',
-        'license_plate_number_col': 'license_plate_number',
-        'license_plate_province_col': 'license_plate_province',
+        except Exception as e:
+            # print(f"Unexpected error displaying image '{full_path}': {e}")
+            error_text = "Error Loading Image"
+            if full_path:
+                error_text += f":\n{os.path.basename(full_path)}"
+            img_to_display = self.create_placeholder_image(error_text, target_width, target_height)
 
-        # New image column names
-        'left_camera_image_file_col': 'left_camera_image_file',
-        'right_camera_image_file_col': 'right_camera_image_file',
-        'top_camera_image_file_col': 'top_camera_image_file',
-        'license_plate_image_file_col': 'license_plate_image_file', # Renamed
+        if img_to_display:
+            tk_img = ImageTk.PhotoImage(img_to_display)
+            label.config(image=tk_img, width=target_width, height=target_height) # Set size for label
+            label.image = tk_img # Keep a reference!
+        else: # Should not happen if logic is correct, but as a fallback:
+            placeholder = self.create_placeholder_image("Fallback Error", target_width, target_height)
+            tk_img = ImageTk.PhotoImage(placeholder)
+            label.config(image=tk_img, width=target_width, height=target_height)
+            label.image = tk_img
 
-        'corrected_container_col': 'corrected_container_number',
-        'corrected_plate_number_col': 'corrected_license_plate_number',
-        'corrected_plate_province_col': 'corrected_license_plate_province',
-        'thai_provinces_list': None
-    }
-    # --- End Configuration ---
 
-    df = load_excel_data(excel_file_path)
-    if df is None:
-        return
+    def create_placeholder_image(self, text, width, height):
+        img = Image.new('RGB', (int(width), int(height)), color="#303030") # Darker placeholder
+        draw = ImageDraw.Draw(img)
+        try:
+            font_size = max(12, int(min(width, height) / 10)) # Dynamic font size
+            font = ImageFont.truetype("arial.ttf", font_size)
+        except IOError:
+            font = ImageFont.load_default()
 
-    # Initialize corrected columns if they don't exist
-    for col_key in ['corrected_container_col', 'corrected_plate_number_col', 'corrected_plate_province_col']:
-        col_name = config[col_key]
-        if col_name not in df.columns:
-            df[col_name] = ''
+        lines = []
+        max_chars_per_line = int(width / (font_size * 0.5)) # Estimate
 
-    # Prepare arguments for each row
-    # We pass a copy of the row data to avoid potential issues with shared state if Series are mutable in some contexts across processes
-    tasks_args = [(index, row.copy(), config) for index, row in df.iterrows()]
+        # Improved text wrapping
+        for paragraph in text.split('\n'): # Handle explicit newlines
+            words = paragraph.split(' ')
+            current_line = ""
+            for word in words:
+                if draw.textbbox((0,0), current_line + word, font=font)[2] <= width - 20: # Check width
+                    current_line += (" " + word if current_line else word)
+                else:
+                    if current_line: lines.append(current_line)
+                    current_line = word
+            if current_line: lines.append(current_line) # Add last line of paragraph
 
-    # Determine number of workers
-    # Use one less than total CPUs to leave resources for other system tasks, or os.cpu_count()
-    num_workers = max(1, multiprocessing.cpu_count() - 1 if multiprocessing.cpu_count() > 1 else 1)
-    print(f"Using {num_workers} worker processes for OCR.")
+        total_text_height = sum(draw.textbbox((0,0), line, font=font)[3] - draw.textbbox((0,0), line, font=font)[1] for line in lines)
+        y_text = (height - total_text_height) / 2
 
-    results = []
-    # Using ProcessPoolExecutor for CPU-bound tasks like OCR
-    with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
-        # Use executor.map to process tasks, wrapped with tqdm for progress
-        # map processes in order and returns results in order
-        future_to_row = {executor.submit(process_row_wrapper, arg_set): arg_set[0] for arg_set in tasks_args}
+        for line in lines:
+            line_bbox = draw.textbbox((0,0), line, font=font)
+            line_width = line_bbox[2] - line_bbox[0]
+            line_height = line_bbox[3] - line_bbox[1]
+            pos = ((width - line_width) / 2, y_text)
+            draw.text(pos, line, fill="white", font=font, anchor="lt") # Left-top anchor
+            y_text += line_height + 2 # spacing
+        return img
 
-        for future in tqdm(concurrent.futures.as_completed(future_to_row), total=len(tasks_args), desc="Processing records"):
+    def on_closing(self, ask_confirmation=True):
+        if ask_confirmation:
+            if not messagebox.askyesno("Quit", "Do you want to save your work before quitting?"):
+                self.destroy() # Destroy window without saving if user says no to saving
+                return
+        # If ask_confirmation is False, or if user said Yes to saving:
+        self.save_and_exit()
+
+
+    def save_and_exit(self):
+        self.save_current_record() # Ensure last record is saved
+
+        # Apply all corrections from self.corrections to self.df
+        if self.df is not None and not self.df.empty:
+            for index, correction_data in self.corrections.items():
+                if index in self.df.index: # Check if index is valid
+                    self.df.loc[index, COLUMN_NAMES['corrected_container']] = correction_data['container']
+                    self.df.loc[index, COLUMN_NAMES['corrected_license_plate']] = correction_data['license_plate']
+                    self.df.loc[index, COLUMN_NAMES['corrected_province']] = correction_data['province']
+
             try:
-                result = future.result()
-                results.append(result)
-            except Exception as exc:
-                row_index = future_to_row[future]
-                print(f"WARNING: Processing failed for row index {row_index} due to an error: '{exc}'. This row's corrected fields may be incomplete. Please check console output for details if errors persist.")
-                # Optionally, mark these rows with an error status in the DataFrame
-                # For now, we just print the error and the row might not get its values updated correctly or at all
-                # depending on where the error occurred in process_row_wrapper.
+                # Make sure output_file_path is absolute or correctly relative
+                abs_output_path = os.path.abspath(self.output_file_path)
+                self.df.to_excel(abs_output_path, index=False)
+                messagebox.showinfo("Save Successful", f"Work saved to:\n{abs_output_path}")
+            except Exception as e:
+                messagebox.showerror("Save Error", f"Could not save the file to '{abs_output_path}'. Error:\n{e}")
+        else:
+            messagebox.showwarning("Save Warning", "No data to save or DataFrame is not loaded.")
 
-    # Update DataFrame with results
-    # It's important to update by index to ensure correctness, especially if results are out of order
-    # (though ProcessPoolExecutor.map returns them in order, as_completed does not)
-    print("Updating DataFrame with processed results...")
-    for res_item in tqdm(results, desc="Updating DataFrame"):
-        idx = res_item['index']
-        for col_key in ['corrected_container_col', 'corrected_plate_number_col', 'corrected_plate_province_col']:
-            col_name = config[col_key]
-            # Ensure the column exists, though it should have been initialized
-            if col_name not in df.columns:
-                df[col_name] = pd.NA # Or some default
-            df.loc[idx, col_name] = res_item[col_name]
+        self.destroy()
 
-    # Save the updated DataFrame
-    try:
-        df.to_excel(output_excel_path, index=False)
-        print(f"Processing complete. Output saved to: {output_excel_path}")
-    except Exception as e:
-        print(f"Error saving Excel file {output_excel_path}: {e}")
-
+# --- 3. SCRIPT EXECUTION ---
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description="Automated Data Verification Tool")
-    parser.add_argument("input_excel",
-                        help="Path to the input Excel file containing data to verify.")
-    parser.add_argument("-o", "--output_excel",
-                        default="corrected_output.xlsx",
-                        help="Path to save the corrected output Excel file (default: corrected_output.xlsx).")
-    # Optional: Add argument for Tesseract path if needed frequently
-    # parser.add_argument("--tesseract_path",
-    #                     help="Path to the Tesseract OCR executable, if not in system PATH.")
-
+    parser = argparse.ArgumentParser(description="Manual Verification Helper v3.0 (Portable & Enhanced)")
+    # Make input_excel optional to allow testing without command line args if needed
+    parser.add_argument("input_excel", nargs='?', default=None, help="Path to the input Excel file. If not provided, a demo mode or file dialog could be initiated (not implemented).")
     args = parser.parse_args()
 
-    # Optional: Configure Tesseract path if provided
-    # if args.tesseract_path:
-    #     pytesseract.pytesseract.tesseract_cmd = args.tesseract_path
-    #     print(f"Using Tesseract OCR from: {args.tesseract_path}")
+    if args.input_excel is None:
+        # Fallback or error if no input file is provided
+        # For now, let's try to ask the user for a file if not given
+        from tkinter import filedialog
+        input_excel_path = filedialog.askopenfilename(
+            title="Select Input Excel File",
+            filetypes=(("Excel files", "*.xlsx *.xls"), ("All files", "*.*"))
+        )
+        if not input_excel_path:
+            # print("No input file selected. Exiting.")
+            messagebox.showerror("Error", "No input Excel file selected. Application will now close.")
+            exit() # Exit if no file chosen from dialog
+    else:
+        input_excel_path = args.input_excel
+        if not os.path.exists(input_excel_path):
+            messagebox.showerror("Error", f"Input file not found:\n{input_excel_path}\nApplication will now close.")
+            exit()
 
 
-    print("Starting Data Verification Process...")
-
-    input_file_path = args.input_excel
-    output_file_path = args.output_excel
-
-    # Example: Check if a dummy input file exists, if not, create one for basic testing
-    # This behavior might be revised: typically a script expects the input file to exist.
-    # For this project, creating a dummy if not found can help first-time users.
-    if not os.path.exists(input_file_path):
-        print(f"Warning: Input file '{input_file_path}' not found.")
-        print(f"Creating a dummy '{input_file_path}' for testing purposes with expected column headers.")
-        print(f"Please replace '{input_file_path}' with your actual data file and ensure image paths are correct.")
-
-        # --- Configuration: Column Names (Must match those in process_data and process_row_wrapper) ---
-        # This needs to be consistent with how process_data expects them or pass them around.
-        # For simplicity, let's use the same default names here for the dummy file.
-        # These should ideally align with the main config keys if used beyond dummy creation.
-        container_number_col_name = 'container_number' # Or fetch from a global config if defined
-        license_plate_number_col_name = 'license_plate_number'
-        license_plate_province_col_name = 'license_plate_province'
-
-        # New image path columns for dummy data
-        left_camera_col_name = 'left_camera_image_file'
-        right_camera_col_name = 'right_camera_image_file'
-        top_camera_col_name = 'top_camera_image_file'
-        license_plate_image_col_name = 'license_plate_image_file'
-        # --- End Configuration ---
-
-        dummy_data = {
-            container_number_col_name: ["CN123", "CN456"],
-            license_plate_number_col_name: ["AB1234", "CD5678"], # Will be updated later for new format
-            license_plate_province_col_name: ["ProvinceA", "ProvinceB"],
-            left_camera_col_name: ["path/to/left_container1.jpg", "path/to/nonexistent_left.jpg"],
-            right_camera_col_name: ["path/to/right_container1.jpg", "path/to/nonexistent_right.jpg"],
-            top_camera_col_name: ["path/to/top_container1.jpg", "path/to/nonexistent_top.jpg"],
-            license_plate_image_col_name: ["path/to/plate1.jpg", "path/to/nonexistent_plate.jpg"]
-        }
-        dummy_df = pd.DataFrame(dummy_data)
-        try:
-            dummy_df.to_excel(input_file_path, index=False)
-            print(f"Dummy '{input_file_path}' created. Please populate it with actual data and image paths.")
-        except Exception as e:
-            print(f"Could not create dummy input file: {e}")
-
-    # Check for Tesseract installation before starting full processing
-    try:
-        tesseract_version = pytesseract.get_tesseract_version()
-        print(f"Found Tesseract OCR version: {tesseract_version}")
-    except pytesseract.TesseractNotFoundError:
-        print("CRITICAL: Tesseract OCR is not installed or not found in your PATH.")
-        print("The program cannot proceed without Tesseract. Please install it and try again.")
-        print("If Tesseract is installed but not in PATH, you might need to set the path explicitly in the script ")
-        print("near the top, where `pytesseract.pytesseract.tesseract_cmd` is mentioned.")
-        exit()
-    except Exception as e:
-        print(f"An error occurred while checking Tesseract version: {e}")
-        # Decide if to exit or continue if version check fails for other reasons
-
-    process_data(input_file_path, output_file_path)
-    print("Data Verification Process Finished.")
+    app = VerificationApp(input_excel_path)
+    app.mainloop()
