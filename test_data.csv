@@ -1,0 +1,7 @@
+container_number,corrected_container_number,license_plate_number,corrected_license_plate_number,license_plate_province,corrected_license_plate_province,top_camera_image_file,left_camera_image_file,right_camera_image_file,license_plate_image_file
+CN001,,LP001,,PROV001,,test_images/container_top1.jpg,test_images/container_left1.jpg,test_images/container_right1.jpg,test_images/plate1.jpg
+CN002,,LP002,,PROV002,,,,
+CN003,,LP003,,PROV003,,,test_images/non_existent_plate.jpg
+CN004,,LP004,MANUAL_LP,PROV004,MANUAL_PROV,,,
+CN005,,LP005,EXISTING_LP,PROV005,EXISTING_PROV,test_images/container_top1.jpg,test_images/container_left1.jpg,test_images/container_right1.jpg,test_images/existing_lp_plate.jpg
+CN006,,LP006,,PROV006,,,,

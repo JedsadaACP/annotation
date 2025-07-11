@@ -57,17 +57,26 @@ class VerificationApp(tk.Tk):
         return f"{name}_corrected{ext}"
 
     def load_data(self):
+        print("DEBUG: Entered load_data()")
         file_to_load = self.input_file_path
-        use_resume_file = False
+        use_resume_file = False # Initialize to default
         if os.path.exists(self.output_file_path):
-            if messagebox.askyesno("Resume Session",
-                                   f"Found previous work in '{os.path.basename(self.output_file_path)}'.\n\nDo you want to resume from where you left off?"):
+            print(f"DEBUG: Found potential resume file: {self.output_file_path}")
+            print("DEBUG: About to ask to resume via messagebox.")
+            # The result of askyesno directly determines if we change file_to_load and set use_resume_file
+            resume_response = messagebox.askyesno("Resume Session",
+                                   f"Found previous work in '{os.path.basename(self.output_file_path)}'.\n\nDo you want to resume from where you left off?")
+            print(f"DEBUG: messagebox.askyesno result: {resume_response}")
+            if resume_response: # True if user clicks "Yes"
                 file_to_load = self.output_file_path
                 use_resume_file = True
+            # If user clicks "No", file_to_load remains self.input_file_path and use_resume_file remains False
 
         try:
+            print(f"DEBUG: Attempting to load Excel file: {file_to_load}")
             dtype_map = {col: str for col in COLUMN_NAMES.values()}
             self.df = pd.read_excel(file_to_load, dtype=dtype_map)
+            print(f"DEBUG: Successfully loaded {file_to_load}. DataFrame shape: {self.df.shape}")
             self.df.columns = self.df.columns.str.strip()
 
             if not use_resume_file:
@@ -77,15 +86,19 @@ class VerificationApp(tk.Tk):
                         self.df[col_name] = ""
 
             self.df = self.df.fillna('')
+            print("DEBUG: Exiting load_data() successfully")
 
         except FileNotFoundError:
+            print(f"DEBUG: Exception in load_data: FileNotFoundError - Input file not found:\n{file_to_load}")
             messagebox.showerror("Error", f"Input file not found:\n{file_to_load}")
             self.df = None
         except Exception as e:
+            print(f"DEBUG: Exception in load_data: {type(e).__name__} - {e}")
             messagebox.showerror("Error", f"Could not read Excel file. Error:\n{e}")
             self.df = None
 
     def find_first_unprocessed_row(self):
+        print("DEBUG: Entered find_first_unprocessed_row()")
         corr_cols = [
             COLUMN_NAMES['corrected_container'],
             COLUMN_NAMES['corrected_license_plate'],
@@ -98,8 +111,10 @@ class VerificationApp(tk.Tk):
                 # This could happen if loading an original file that never had these columns.
                 # The load_data method tries to add them if not use_resume_file.
                 # If they are still missing, it's safer to start from 0.
+                print(f"DEBUG: Exiting find_first_unprocessed_row(), returning index: 0 (missing column: {col})")
                 return 0
 
+        print(f"DEBUG: Columns checked. DataFrame shape: {self.df.shape}")
         # Proceed only if all expected correction columns are present
         unprocessed_conditions = []
         for col in corr_cols:
@@ -116,10 +131,14 @@ class VerificationApp(tk.Tk):
         unprocessed = self.df[combined_condition]
 
         if not unprocessed.empty:
-            return unprocessed.index[0]
+            index_value = unprocessed.index[0]
+            print(f"DEBUG: Exiting find_first_unprocessed_row(), returning index: {index_value}")
+            return index_value
+        print(f"DEBUG: Exiting find_first_unprocessed_row(), returning index: 0 (no unprocessed records or empty df)")
         return 0 # Default to 0 if all records are processed or if df is empty
 
     def load_existing_corrections(self):
+        print("DEBUG: Entered load_existing_corrections()")
         corrections = {}
         # Define keys for correction data to check if they exist in the DataFrame
         correction_keys_to_check = [
@@ -143,6 +162,8 @@ class VerificationApp(tk.Tk):
             }
             if any(val for val in correction_data.values() if val): # Check if any value is non-empty
                  corrections[index] = correction_data
+        print(f"DEBUG: Finished iterating rows for corrections. Number of corrections loaded: {len(corrections)}")
+        print("DEBUG: Exiting load_existing_corrections()")
         return corrections
 
     def setup_styles(self):
@@ -262,6 +283,7 @@ class VerificationApp(tk.Tk):
         tk.Label(right_nav_frame, text="(Press Enter)", font=self.small_font, fg="#B0B0B0", bg="#2E2E2E").pack(side=tk.LEFT, padx=(5,0))
 
         self.bind('<Return>', self.next_record_event) # Global Enter key binding
+        print("DEBUG: Global <Return> key bound to self.next_record_event")
 
     def load_record(self, index_to_load):
         if not (0 <= index_to_load < self.total_records):
@@ -314,9 +336,16 @@ class VerificationApp(tk.Tk):
 
         if 'container' in self.entry_boxes: # Ensure focus target exists
             self.entry_boxes['container'].focus_set()
+            print(f"DEBUG: Focus set to container entry. Current focus: {self.focus_get()}")
+
+        print(f"DEBUG: State of 'container' entry box: {self.entry_boxes['container'].cget('state')}")
+        print(f"DEBUG: State of 'license_plate' entry box: {self.entry_boxes['license_plate'].cget('state')}")
+        print(f"DEBUG: State of 'province' entry box: {self.entry_boxes['province'].cget('state')}")
 
     def save_current_record(self):
+        print("DEBUG: Entered save_current_record")
         if self.current_index is None or not (0 <= self.current_index < self.total_records):
+            print("DEBUG: Exiting save_current_record (invalid index or no record)")
             return # No valid record to save
 
         self.corrections[self.current_index] = {
@@ -324,16 +353,24 @@ class VerificationApp(tk.Tk):
             'license_plate': self.entry_boxes['license_plate'].get(),
             'province': self.entry_boxes['province'].get()
         }
+        print(f"DEBUG: Corrections updated for index {self.current_index}: {self.corrections[self.current_index]}")
+        print("DEBUG: Exiting save_current_record")
 
     def next_record_event(self, event=None):
+        print(f"DEBUG: next_record_event triggered. Event: {event}")
+        print("DEBUG: next_record_event calling self.save_current_record()")
         self.save_current_record()
+        print("DEBUG: next_record_event returned from self.save_current_record()")
         if self.current_index + 1 < self.total_records:
+            print(f"DEBUG: next_record_event attempting to load record index {self.current_index + 1}")
             self.load_record(self.current_index + 1)
         else:
             # If on the last record, ask_confirmation should ideally be False if "Save and Finish" implies auto-save.
             # However, current on_closing always asks if True by default.
             # For "Save and Finish", we want to save and exit without re-asking.
+            print("DEBUG: next_record_event calling self.on_closing for last record")
             self.on_closing(ask_confirmation=False)
+        print("DEBUG: Exiting next_record_event")
 
 
     def prev_record_event(self):
