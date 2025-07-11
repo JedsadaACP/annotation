@@ -1,0 +1,8 @@
+container_number,license_plate_number,corrected_license_plate_number,license_plate_province,corrected_license_plate_province,top_camera_image_file,left_camera_image_file,right_camera_image_file,license_plate_image_file
+REC001,LP_Orig_OK,LP_Correct_OK,Bangkok,Bangkok,test_images_for_checkpy/top1.jpg,,test_images_for_checkpy/left1.jpg,test_images_for_checkpy/plateA.jpg
+REC002,LP_Orig_Short,S,Province_Orig_Misspelled,Chiang Mai (Fixed),test_images_for_checkpy/top1.jpg,,,test_images_for_checkpy/plateB.jpg
+REC003,LP_Orig_Long,WAYTOOLONGPLATEFORSURE,Phuket_Orig,ภูเก็ต (แก้ไขแล้ว),,,test_images_for_checkpy/non_existent_plate.jpg
+REC004,LP_Orig_Foreign,FOREIGN_LP_XYZ,NotThaiProv,Selangor_Corrected,,,,test_images_for_checkpy/plateA.jpg
+REC005,LP_Orig_Thai_Typo,TYPO_LP_กรุงเทพ,บางกอก,กรุงเทพมหานคร,test_images_for_checkpy/top1.jpg,,,
+REC006,LP_Orig_For_Consistency,--,ProvinceForConsistency,Nonthaburi_Corrected,,,test_images_for_checkpy/plateB.jpg
+REC007,LP_Orig_For_Consistency_2,GoodLP_ABC123,--,TestProvince,--,,,test_images_for_checkpy/plateA.jpg

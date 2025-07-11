@@ -72,20 +72,22 @@ class AnalysisApp(tk.Tk):
         for widget in results_list_frame.winfo_children():
             widget.destroy()
 
-        columns = ("index", "field", "value", "reason")
+        columns = ("index", "field", "original_value", "value", "reason") # New: added "original_value"
         self.results_treeview = ttk.Treeview(results_list_frame, columns=columns, show="headings")
 
         # Define headings
         self.results_treeview.heading("index", text="Record Index", command=lambda: self.sort_treeview_column("index", False))
         self.results_treeview.heading("field", text="Flagged Field", command=lambda: self.sort_treeview_column("field", False))
-        self.results_treeview.heading("value", text="Field Value", command=lambda: self.sort_treeview_column("value", False))
+        self.results_treeview.heading("original_value", text="Original Value", command=lambda: self.sort_treeview_column("original_value", False)) # New Column
+        self.results_treeview.heading("value", text="Corrected Value", command=lambda: self.sort_treeview_column("value", False)) # Text changed for clarity
         self.results_treeview.heading("reason", text="Reason for Flag", command=lambda: self.sort_treeview_column("reason", False))
 
         # Configure column widths (adjust as needed)
         self.results_treeview.column("index", width=80, anchor=tk.W)
         self.results_treeview.column("field", width=150, anchor=tk.W)
-        self.results_treeview.column("value", width=200, anchor=tk.W)
-        self.results_treeview.column("reason", width=300, anchor=tk.W) # Wider for reason
+        self.results_treeview.column("original_value", width=200, anchor=tk.W) # New Column
+        self.results_treeview.column("value", width=200, anchor=tk.W) # Renamed "Field Value" to "Corrected Value"
+        self.results_treeview.column("reason", width=300, anchor=tk.W)
 
         # Add a vertical scrollbar
         vsb = ttk.Scrollbar(results_list_frame, orient="vertical", command=self.results_treeview.yview)
@@ -194,11 +196,13 @@ class AnalysisApp(tk.Tk):
 
         for index, row in df.iterrows():
             province = str(row[COLUMN_NAMES['corrected_province']]).strip()
+            original_province = str(row.get(COLUMN_NAMES['province'], 'N/A')).strip() # Get original
             if province and province not in thai_provinces_set and province not in ['-', '--']: # Ignore placeholders
                 flagged.append({
                     'index': index,
                     'field': COLUMN_NAMES['corrected_province'],
-                    'value': province,
+                    'original_value': original_province, # ADDED
+                    'value': province, # This is the corrected value
                     'reason': 'Not in standard Thai province list (or is foreign/misspelled)'
                 })
         print(f"DEBUG: Province analysis flagged {len(flagged)} records.")
@@ -224,6 +228,7 @@ class AnalysisApp(tk.Tk):
 
         for index, row in df.iterrows():
             lp = str(row[COLUMN_NAMES['corrected_license_plate']]).strip()
+            original_lp = str(row.get(COLUMN_NAMES['license_plate'], 'N/A')).strip() # Get original
             if not lp or lp in ['-', '--']: # Skip empty or placeholders
                 continue
 
@@ -232,7 +237,8 @@ class AnalysisApp(tk.Tk):
                 flagged.append({
                     'index': index,
                     'field': COLUMN_NAMES['corrected_license_plate'],
-                    'value': lp,
+                    'original_value': original_lp, # ADDED
+                    'value': lp, # Corrected value
                     'reason': f'Invalid length (expected {MIN_LP_LENGTH}-{MAX_LP_LENGTH})'
                 })
                 continue # Don't check chars if length is already wrong for this example
@@ -273,6 +279,8 @@ class AnalysisApp(tk.Tk):
         for index, row in df.iterrows():
             lp = str(row[COLUMN_NAMES['corrected_license_plate']]).strip()
             prov = str(row[COLUMN_NAMES['corrected_province']]).strip()
+            original_lp = str(row.get(COLUMN_NAMES['license_plate'], 'N/A')).strip()
+            original_prov = str(row.get(COLUMN_NAMES['province'], 'N/A')).strip()
 
             is_lp_placeholder = lp in ['-', '--']
             is_prov_placeholder = prov in ['-', '--']
@@ -284,7 +292,8 @@ class AnalysisApp(tk.Tk):
                 flagged.append({
                     'index': index,
                     'field': 'LP/Province Consistency',
-                    'value': f'LP: {lp}, Prov: {prov}',
+                    'original_value': f"Orig LP: {original_lp}, Orig Prov: {original_prov}", # ADDED/MODIFIED
+                    'value': f'Corr LP: {lp}, Corr Prov: {prov}', # Corrected values
                     'reason': 'LP is placeholder but Province is specific value'
                 })
             # Case 2: Province is a placeholder, but LP is a specific value (not empty and not a placeholder)
@@ -292,7 +301,8 @@ class AnalysisApp(tk.Tk):
                 flagged.append({
                     'index': index,
                     'field': 'LP/Province Consistency',
-                    'value': f'LP: {lp}, Prov: {prov}',
+                    'original_value': f"Orig LP: {original_lp}, Orig Prov: {original_prov}", # ADDED/MODIFIED
+                    'value': f'Corr LP: {lp}, Corr Prov: {prov}', # Corrected values
                     'reason': 'Province is placeholder but LP is specific value'
                 })
         print(f"DEBUG: Consistency analysis flagged {len(flagged)} records.")
@@ -343,9 +353,10 @@ class AnalysisApp(tk.Tk):
             # Ensure all keys are present, provide default if not, though check functions should be consistent
             idx = record_info.get('index', 'N/A')
             field = record_info.get('field', 'N/A')
+            original_value = str(record_info.get('original_value', 'N/A')) # Get original_value
             value = str(record_info.get('value', 'N/A')) # Ensure value is string for display
             reason = record_info.get('reason', 'N/A')
-            self.results_treeview.insert("", tk.END, values=(idx, field, value, reason))
+            self.results_treeview.insert("", tk.END, values=(idx, field, original_value, value, reason))
 
     def sort_treeview_column(self, col_name, reverse):
         # Check if this column was the last one sorted
@@ -360,9 +371,9 @@ class AnalysisApp(tk.Tk):
         self.treeview_sort_reverse = current_reverse_state # Store the current sort direction
 
         # Get data from treeview rows. l is a list of tuples (value, item_id)
-        # The values are (idx, field, value, reason)
+        # The values are (idx, field, value, reason) -> now (idx, field, original_value, value, reason)
         # We need to map col_name to the index in these tuples
-        col_map = {"index": 0, "field": 1, "value": 2, "reason": 3}
+        col_map = {"index": 0, "field": 1, "original_value": 2, "value": 3, "reason": 4} # New map
         col_index = col_map.get(col_name)
 
         if col_index is None:

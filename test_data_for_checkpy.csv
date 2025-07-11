@@ -1,0 +1,11 @@
+container_number,corrected_container_number,license_plate_number,corrected_license_plate_number,license_plate_province,corrected_license_plate_province,top_camera_image_file,left_camera_image_file,right_camera_image_file,license_plate_image_file
+REC001,,LP_Orig1,Short,Province_Orig1,Bangkok,test_images_for_checkpy/top1.jpg,,test_images_for_checkpy/left1.jpg,test_images_for_checkpy/plateA.jpg
+REC002,,LP_Orig2,LongAndValid123,Province_Orig2,Phuket,test_images_for_checkpy/top1.jpg,,,test_images_for_checkpy/plateB.jpg
+REC003,,LP_Orig3,WAYTOOLONGPLATE,Province_Orig3,Chiang Mai,,,,test_images_for_checkpy/non_existent_plate.jpg
+REC004,,LP_Orig4,NORMAL_LP,Province_Orig4,Selangor,,,,test_images_for_checkpy/plateA.jpg
+REC005,,LP_Orig5,TYPO_LP,Province_Orig5,บึงกาฬลล,test_images_for_checkpy/top1.jpg,,,
+REC006,,LP_Orig6,--,Province_Orig6,Nonthaburi,,,,test_images_for_checkpy/plateB.jpg
+REC007,,LP_Orig7,GOODLP1,Province_Orig7,--,,,,test_images_for_checkpy/plateA.jpg
+REC008,,LP_Orig8,GOODLP2,Province_Orig8,Surat Thani,,,,
+REC009,,LP_Orig9,อันนี้ยาวมากไป,Province_Orig9,เลย,,,,test_images_for_checkpy/plateB.jpg
+REC010,,LP_Orig10,สั้น,Province_Orig10,กรุงเทพมหานคร,,,,test_images_for_checkpy/plateA.jpg
