@@ -32,6 +32,7 @@ class VerificationApp(tk.Tk):
         self.input_file_path = excel_path
         self.base_dir = os.path.dirname(os.path.abspath(excel_path))
         self.output_file_path = self.generate_output_filename(excel_path)
+        self.resume_file_exists = False # ADD THIS LINE
 
         self.df = None
         self.load_data()
@@ -57,43 +58,34 @@ class VerificationApp(tk.Tk):
         return f"{name}_corrected{ext}"
 
     def load_data(self):
-        print("DEBUG: Entered load_data()")
+        # The logic to decide whether to load the resume file is removed from here.
+        # We will always load the base file initially.
         file_to_load = self.input_file_path
-        use_resume_file = False # Initialize to default
+
+        # Just check if the resume file exists and set a flag.
         if os.path.exists(self.output_file_path):
-            print(f"DEBUG: Found potential resume file: {self.output_file_path}")
-            print("DEBUG: About to ask to resume via messagebox.")
-            # The result of askyesno directly determines if we change file_to_load and set use_resume_file
-            resume_response = messagebox.askyesno("Resume Session",
-                                   f"Found previous work in '{os.path.basename(self.output_file_path)}'.\n\nDo you want to resume from where you left off?")
-            print(f"DEBUG: messagebox.askyesno result: {resume_response}")
-            if resume_response: # True if user clicks "Yes"
-                file_to_load = self.output_file_path
-                use_resume_file = True
-            # If user clicks "No", file_to_load remains self.input_file_path and use_resume_file remains False
+            self.resume_file_exists = True
+            print(f"DEBUG: Resume file found at {self.output_file_path}")
 
         try:
-            print(f"DEBUG: Attempting to load Excel file: {file_to_load}")
+            print(f"DEBUG: Loading initial file: {file_to_load}")
             dtype_map = {col: str for col in COLUMN_NAMES.values()}
             self.df = pd.read_excel(file_to_load, dtype=dtype_map)
-            print(f"DEBUG: Successfully loaded {file_to_load}. DataFrame shape: {self.df.shape}")
             self.df.columns = self.df.columns.str.strip()
 
-            if not use_resume_file:
-                 for col_type in ['corrected_container', 'corrected_license_plate', 'corrected_province']:
-                    col_name = COLUMN_NAMES[col_type]
-                    if col_name not in self.df.columns:
-                        self.df[col_name] = ""
+            # This logic is for initializing a new session, which is correct
+            # since we are always loading the original file now.
+            for col_type in ['corrected_container', 'corrected_license_plate', 'corrected_province']:
+                col_name = COLUMN_NAMES[col_type]
+                if col_name not in self.df.columns:
+                    self.df[col_name] = ""
 
             self.df = self.df.fillna('')
-            print("DEBUG: Exiting load_data() successfully")
 
         except FileNotFoundError:
-            print(f"DEBUG: Exception in load_data: FileNotFoundError - Input file not found:\n{file_to_load}")
             messagebox.showerror("Error", f"Input file not found:\n{file_to_load}")
             self.df = None
         except Exception as e:
-            print(f"DEBUG: Exception in load_data: {type(e).__name__} - {e}")
             messagebox.showerror("Error", f"Could not read Excel file. Error:\n{e}")
             self.df = None
 
@@ -176,23 +168,82 @@ class VerificationApp(tk.Tk):
         self.copy_btn_font = tkFont.Font(family="Segoe UI", size=11)
 
     def create_widgets(self):
-        self.grid_rowconfigure(1, weight=1)
-        self.grid_columnconfigure(0, weight=1)
+        # --- Resume Frame ---
+        self.resume_frame = tk.Frame(self, bg="#4A90E2", pady=5)
+        self.resume_frame.pack(fill=tk.X, side=tk.TOP)
 
-        self.progress_label = tk.Label(self, text="", font=self.header_font, fg="white", bg="#2E2E2E", pady=10)
+        resume_label = tk.Label(self.resume_frame, text="Previous session file found.", font=self.label_font, fg="white", bg="#4A90E2")
+        resume_label.pack(side=tk.LEFT, padx=(10, 20))
+
+        self.load_resume_button = tk.Button(self.resume_frame, text="Load Previous Session", font=self.button_font, command=self.load_resume_data)
+        self.load_resume_button.pack(side=tk.LEFT, padx=5)
+
+        self.dismiss_resume_button = tk.Button(self.resume_frame, text="Dismiss", font=self.button_font, command=self.resume_frame.pack_forget)
+        self.dismiss_resume_button.pack(side=tk.LEFT, padx=5)
+
+        if not self.resume_file_exists:
+            self.resume_frame.pack_forget() # Hide if no resume file
+
+        # --- Main Content Frame ---
+        main_content_frame = tk.Frame(self, bg="#2E2E2E")
+        main_content_frame.pack(fill=tk.BOTH, expand=True)
+
+        main_content_frame.grid_rowconfigure(1, weight=1)
+        main_content_frame.grid_columnconfigure(0, weight=1)
+
+        # Now, all original grid calls are relative to main_content_frame
+        self.progress_label = tk.Label(main_content_frame, text="", font=self.header_font, fg="white", bg="#2E2E2E", pady=10)
         self.progress_label.grid(row=0, column=0, sticky="ew")
-        content_frame = tk.Frame(self, bg="#2E2E2E")
+
+        content_frame = tk.Frame(main_content_frame, bg="#2E2E2E")
         content_frame.grid(row=1, column=0, sticky="nsew", padx=20, pady=10)
-        content_frame.grid_columnconfigure(1, weight=1) # Allow image frame to expand
-        data_frame = tk.Frame(content_frame, bg="#2E2E2E", width=400) # Fixed width for data
+
+        content_frame.grid_columnconfigure(1, weight=1)
+        data_frame = tk.Frame(content_frame, bg="#2E2E2E", width=400)
         data_frame.grid(row=0, column=0, sticky="ns", padx=(0, 20))
-        data_frame.grid_propagate(False) # Prevent data_frame from shrinking/growing with content
+        data_frame.grid_propagate(False)
+
         image_frame = tk.Frame(content_frame, bg="#2E2E2E")
         image_frame.grid(row=0, column=1, sticky="nsew")
 
+        # Call original methods to create data/image/nav sections, but pass main_content_frame for nav
         self.create_data_section(data_frame)
         self.create_image_section(image_frame)
-        self.create_navigation_section()
+        self.create_navigation_section(main_content_frame) # Pass the main frame to nav
+
+    def load_resume_data(self):
+        print("DEBUG: load_resume_data called.")
+        file_to_load = self.output_file_path
+
+        try:
+            print(f"DEBUG: Loading resume file: {file_to_load}")
+            dtype_map = {col: str for col in COLUMN_NAMES.values()}
+            self.df = pd.read_excel(file_to_load, dtype=dtype_map)
+            self.df.columns = self.df.columns.str.strip()
+            self.df = self.df.fillna('')
+            print(f"DEBUG: Successfully loaded resume file. DataFrame shape: {self.df.shape}")
+
+            # Re-initialize the application state with the new DataFrame
+            self.total_records = len(self.df)
+            self.current_index = self.find_first_unprocessed_row()
+            self.corrections = self.load_existing_corrections()
+
+            # Load the first unprocessed record
+            self.load_record(self.current_index)
+
+            # Hide the resume banner after successfully loading
+            self.resume_frame.pack_forget()
+
+            messagebox.showinfo("Resume Successful", f"Successfully resumed session from {os.path.basename(file_to_load)}.")
+
+        except FileNotFoundError:
+            print(f"DEBUG: Resume file not found at path: {file_to_load}")
+            messagebox.showerror("Error", f"Resume file not found (it may have been moved or deleted):\n{file_to_load}")
+            self.df = None # Mark as failed
+        except Exception as e:
+            print(f"DEBUG: Error loading resume file: {type(e).__name__} - {e}")
+            messagebox.showerror("Error", f"Could not read the resume file. Error:\n{e}")
+            self.df = None # Mark as failed
 
     def create_data_section(self, parent):
         self.data_labels = {}
@@ -259,8 +310,8 @@ class VerificationApp(tk.Tk):
             img_label.pack(fill=tk.BOTH, expand=True)
             self.image_labels[key] = img_label
 
-    def create_navigation_section(self):
-        nav_frame = tk.Frame(self, bg="#2E2E2E", pady=10)
+    def create_navigation_section(self, parent):
+        nav_frame = tk.Frame(parent, bg="#2E2E2E", pady=10)
         nav_frame.grid(row=2, column=0, sticky="ew", padx=20)
 
         self.back_button = tk.Button(nav_frame, text="<< Go Back", command=self.prev_record_event, bg="#555555", font=self.button_font, fg="white", relief=tk.FLAT, padx=10, pady=5)
@@ -336,11 +387,14 @@ class VerificationApp(tk.Tk):
 
         if 'container' in self.entry_boxes: # Ensure focus target exists
             self.entry_boxes['container'].focus_set()
-            print(f"DEBUG: Focus set to container entry. Current focus: {self.focus_get()}")
-
-        print(f"DEBUG: State of 'container' entry box: {self.entry_boxes['container'].cget('state')}")
-        print(f"DEBUG: State of 'license_plate' entry box: {self.entry_boxes['license_plate'].cget('state')}")
-        print(f"DEBUG: State of 'province' entry box: {self.entry_boxes['province'].cget('state')}")
+            # Add the following lines for diagnostics:
+            print(f"DEBUG: Record {self.current_index} loaded.")
+            try:
+                print(f"DEBUG: Focus is on widget: {self.focus_get()}")
+                print(f"DEBUG: State of 'container' entry: {self.entry_boxes['container'].cget('state')}")
+                print(f"DEBUG: State of 'license_plate' entry: {self.entry_boxes['license_plate'].cget('state')}")
+            except Exception as e:
+                print(f"DEBUG: Error getting focus or widget state: {e}")
 
     def save_current_record(self):
         print("DEBUG: Entered save_current_record")
@@ -357,20 +411,12 @@ class VerificationApp(tk.Tk):
         print("DEBUG: Exiting save_current_record")
 
     def next_record_event(self, event=None):
-        print(f"DEBUG: next_record_event triggered. Event: {event}")
-        print("DEBUG: next_record_event calling self.save_current_record()")
+        print(f"DEBUG: next_record_event triggered. Event: {event}") # Add this
         self.save_current_record()
-        print("DEBUG: next_record_event returned from self.save_current_record()")
         if self.current_index + 1 < self.total_records:
-            print(f"DEBUG: next_record_event attempting to load record index {self.current_index + 1}")
             self.load_record(self.current_index + 1)
         else:
-            # If on the last record, ask_confirmation should ideally be False if "Save and Finish" implies auto-save.
-            # However, current on_closing always asks if True by default.
-            # For "Save and Finish", we want to save and exit without re-asking.
-            print("DEBUG: next_record_event calling self.on_closing for last record")
             self.on_closing(ask_confirmation=False)
-        print("DEBUG: Exiting next_record_event")
 
 
     def prev_record_event(self):
