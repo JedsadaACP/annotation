@@ -15,7 +15,7 @@ class TestStatisticsAnalyzer(unittest.TestCase):
             'CorrectedProvince': ['Bangkok', 'Chiang Mai', 'Phuket', 'Pattaya'],
         }
         self.df = pd.DataFrame(data)
-        self.config = {
+        self.app_config = {
             "column_mapping": {
                 "container_number_original": "OriginalContainerNo",
                 "container_number_corrected": "CorrectedContainerNo",
@@ -27,7 +27,7 @@ class TestStatisticsAnalyzer(unittest.TestCase):
         }
 
     def test_analyze(self):
-        analyzer = StatisticsAnalyzer(self.df, self.config)
+        analyzer = StatisticsAnalyzer(self.df, self.app_config)
         report = analyzer.analyze()
 
         # Check container number stats

@@ -429,12 +429,12 @@ class VerificationApp(tk.Tk):
         self.input_excel_path = excel_file_path # Store the input excel path
         logger.info(f"Application trying to start with Excel file: {self.input_excel_path}")
 
-        self.config = None
+        self.app_config = None
         self.load_configuration("config.json")
 
-        if not self.config:
+        if not self.app_config:
             logger.error("Configuration not loaded. Application cannot continue.")
-            # Messagebox already shown by load_configuration or create_default_config if they lead to self.config being None
+            # Messagebox already shown by load_configuration or create_default_config if they lead to self.app_config being None
             self.destroy()
             return # Stop further initialization
 
@@ -556,7 +556,7 @@ class VerificationApp(tk.Tk):
 
         # Menu Bar
         menubar = tk.Menu(self)
-        self.config(menu=menubar)
+        self.configure(menu=menubar)
 
         # File Menu
         file_menu = tk.Menu(menubar, tearoff=0)
@@ -689,10 +689,10 @@ class VerificationApp(tk.Tk):
         ]
 
         for key in field_display_order:
-            if key not in self.config["column_mapping"]:
+            if key not in self.app_config["column_mapping"]:
                 continue
 
-            actual_col_name = self.config["column_mapping"][key]
+            actual_col_name = self.app_config["column_mapping"][key]
 
             # Make display name more readable
             display_key_name = key.replace("_", " ").title()
@@ -710,7 +710,7 @@ class VerificationApp(tk.Tk):
             if key.endswith("_corrected"):
                 # Determine original value for "Copy" button
                 original_key_name = key.replace("_corrected", "_original")
-                original_df_col_name = self.config["column_mapping"].get(original_key_name)
+                original_df_col_name = self.app_config["column_mapping"].get(original_key_name)
                 original_value = record.get(original_df_col_name, "") if original_df_col_name else ""
 
                 # Check self.corrections first, then df
@@ -725,7 +725,7 @@ class VerificationApp(tk.Tk):
                     entry_style_key = "Province.DataEntry.TEntry" # Use specific style for province
                     entry_widget = AutocompleteEntry(field_frame,
                                                      textvariable=string_var,
-                                                     completion_list=self.config.get('provinces', []),
+                                                     completion_list=self.app_config.get('provinces', []),
                                                      style=entry_style_key,
                                                      font=PROVINCE_FONT, # Explicitly set font here for AutocompleteEntry
                                                      width=25)
@@ -771,7 +771,7 @@ class VerificationApp(tk.Tk):
             self.corrections[self.current_record_index] = {}
 
         # Get original value from DataFrame for comparison
-        df_col_name = self.config['column_mapping'].get(field_key)
+        df_col_name = self.app_config['column_mapping'].get(field_key)
         original_df_value = ""
         if df_col_name and df_col_name in self.df.columns:
             original_df_value = str(self.df.loc[self.current_record_index, df_col_name])
@@ -810,7 +810,7 @@ class VerificationApp(tk.Tk):
             record_corrections = self.corrections[self.current_record_index]
             made_change_to_df = False
             for field_key, new_value in record_corrections.items():
-                df_column_name = self.config['column_mapping'].get(field_key)
+                df_column_name = self.app_config['column_mapping'].get(field_key)
                 if df_column_name:
                     # Compare with current DF value before updating to see if it's a real change
                     if str(self.df.loc[self.current_record_index, df_column_name]) != str(new_value):
@@ -818,7 +818,7 @@ class VerificationApp(tk.Tk):
                         made_change_to_df = True
                         logger.info(f"Record {self.current_record_index}: Applied change for {field_key} ('{df_column_name}') to DataFrame: '{new_value}'")
                 else:
-                    logger.warning(f"Could not find DataFrame column for field_key {field_key} in config.")
+                    logger.warning(f"Could not find DataFrame column for field_key {field_key} in app_config.")
 
             if made_change_to_df:
                 # This is a good place to manage the 'corrections_made' stat accurately for the record.
@@ -892,7 +892,7 @@ class VerificationApp(tk.Tk):
                 try:
                     xls = pd.ExcelFile(self.input_excel_path, engine='openpyxl')
                     for sheet_name in xls.sheet_names:
-                        if sheet_name != self.config['sheet_name']:
+                        if sheet_name != self.app_config['sheet_name']:
                             sheets_data[sheet_name] = pd.read_excel(xls, sheet_name=sheet_name)
                     xls.close() # Close the file explicitly
                 except Exception as e: # Broad exception for issues reading original file
@@ -902,8 +902,8 @@ class VerificationApp(tk.Tk):
 
             with pd.ExcelWriter(self.output_excel_path, engine='openpyxl') as writer:
                 # Write the main DataFrame
-                self.df.to_excel(writer, sheet_name=self.config['sheet_name'], index=False)
-                logger.info(f"Data for sheet '{self.config['sheet_name']}' written to Excel writer.")
+                self.df.to_excel(writer, sheet_name=self.app_config['sheet_name'], index=False)
+                logger.info(f"Data for sheet '{self.app_config['sheet_name']}' written to Excel writer.")
 
                 # Write back other sheets
                 for sheet_name, df_sheet in sheets_data.items():
@@ -947,7 +947,7 @@ class VerificationApp(tk.Tk):
                 corrected_values = {}
                 has_difference_for_this_record = False
 
-                for map_key, df_col_name in self.config["column_mapping"].items():
+                for map_key, df_col_name in self.app_config["column_mapping"].items():
                     if map_key.endswith("_original"):
                         original_values[map_key.replace("_original", "")] = self.df.loc[record_idx, df_col_name]
                     elif map_key.endswith("_corrected"):
@@ -984,7 +984,7 @@ class VerificationApp(tk.Tk):
         report_lines.append("\n" + "="*30 + "\n")
 
         # Add detailed statistics
-        analyzer = StatisticsAnalyzer(self.df.copy(), self.config)
+        analyzer = StatisticsAnalyzer(self.df.copy(), self.app_config)
         stats_text = analyzer.analyze()
         report_lines.append(stats_text)
 
@@ -1017,21 +1017,21 @@ class VerificationApp(tk.Tk):
         # Container Number
         original_container_key = "container_number_original"
         corrected_container_key = "container_number_corrected"
-        if original_container_key in self.config["column_mapping"] and corrected_container_key in self.config["column_mapping"]:
-            original_container_val = record.get(self.config["column_mapping"][original_container_key], "CONT")
+        if original_container_key in self.app_config["column_mapping"] and corrected_container_key in self.app_config["column_mapping"]:
+            original_container_val = record.get(self.app_config["column_mapping"][original_container_key], "CONT")
             simulated_ocr_results[corrected_container_key] = f"{original_container_val[:4]}_OCR{datetime.now().second:02d}"
 
         # License Plate
         original_lp_key = "license_plate_original"
         corrected_lp_key = "license_plate_corrected"
-        if original_lp_key in self.config["column_mapping"] and corrected_lp_key in self.config["column_mapping"]:
-            original_lp_val = record.get(self.config["column_mapping"][original_lp_key], "PLATE")
+        if original_lp_key in self.app_config["column_mapping"] and corrected_lp_key in self.app_config["column_mapping"]:
+            original_lp_val = record.get(self.app_config["column_mapping"][original_lp_key], "PLATE")
             simulated_ocr_results[corrected_lp_key] = f"{original_lp_val[:3]}_OCR{datetime.now().microsecond % 1000:03d}"
 
         # Province - pick a valid one, maybe cycle through them or pick first
         corrected_prov_key = "province_corrected"
-        if corrected_prov_key in self.config["column_mapping"]:
-            provinces = self.config.get('provinces', ["(OCR PROVINCE)"])
+        if corrected_prov_key in self.app_config["column_mapping"]:
+            provinces = self.app_config.get('provinces', ["(OCR PROVINCE)"])
             if provinces:
                 # Simple way to vary suggestion: cycle based on record index
                 simulated_ocr_results[corrected_prov_key] = provinces[self.current_record_index % len(provinces)]
@@ -1078,7 +1078,7 @@ class VerificationApp(tk.Tk):
                     self.image_labels[i].image = None
             return
 
-        image_path_cols = self.config['column_mapping'].get('image_paths', [])
+        image_path_cols = self.app_config['column_mapping'].get('image_paths', [])
         base_dir = os.path.dirname(self.input_excel_path)
 
         # Get current dimensions of an image cell
@@ -1282,20 +1282,20 @@ class VerificationApp(tk.Tk):
                 logger.info(f"User chose not to resume. Starting fresh from: {self.input_excel_path}. Previous corrections might be overwritten on save.")
 
         try:
-            logger.info(f"Attempting to load Excel file: {file_to_load} using sheet: {self.config['sheet_name']}")
-            self.df = pd.read_excel(file_to_load, sheet_name=self.config['sheet_name'], engine='openpyxl', dtype=str) # Load all as string initially
+            logger.info(f"Attempting to load Excel file: {file_to_load} using sheet: {self.app_config['sheet_name']}")
+            self.df = pd.read_excel(file_to_load, sheet_name=self.app_config['sheet_name'], engine='openpyxl', dtype=str) # Load all as string initially
             self.df = self.df.fillna('') # Replace NaN with empty strings for consistency
             logger.info(f"Successfully loaded {len(self.df)} records from {file_to_load}.")
 
             if self.df.empty:
-                logger.warning(f"Loaded Excel file {file_to_load} (sheet: {self.config['sheet_name']}) is empty.")
+                logger.warning(f"Loaded Excel file {file_to_load} (sheet: {self.app_config['sheet_name']}) is empty.")
                 # update_status_bar will show "Excel file loaded but is empty..."
                 # No need to exit, but further operations might be limited.
 
             # Verify required columns from column_mapping actually exist in the loaded DataFrame
             # These are the source columns that the tool expects to read data from.
             critical_source_cols_missing = []
-            for map_key, config_col_name in self.config["column_mapping"].items():
+            for map_key, config_col_name in self.app_config["column_mapping"].items():
                 if not map_key.endswith("_corrected"): # These are original data columns or image path lists
                     if isinstance(config_col_name, list): # e.g. image_paths
                         for img_col in config_col_name:
@@ -1312,8 +1312,8 @@ class VerificationApp(tk.Tk):
                 self.update_status_bar()
                 return
 
-            # Initialize _corrected columns if they don't exist (common when loading original, or if config changed)
-            for map_key, actual_col_name in self.config["column_mapping"].items():
+            # Initialize _corrected columns if they don't exist (common when loading original, or if app_config changed)
+            for map_key, actual_col_name in self.app_config["column_mapping"].items():
                 if map_key.endswith("_corrected"):
                     if actual_col_name not in self.df.columns:
                         logger.info(f"Initializing missing corrected column: {actual_col_name} with empty strings.")
@@ -1324,8 +1324,8 @@ class VerificationApp(tk.Tk):
             if resuming_session and not self.df.empty:
                 # Get names of columns that store corrections
                 corrected_column_target_names = [
-                    self.config["column_mapping"][k]
-                    for k in self.config["column_mapping"] if k.endswith("_corrected")
+                    self.app_config["column_mapping"][k]
+                    for k in self.app_config["column_mapping"] if k.endswith("_corrected")
                 ]
                 # Ensure these columns actually exist in the DataFrame before checking them
                 existing_corrected_cols = [name for name in corrected_column_target_names if name in self.df.columns]
@@ -1347,7 +1347,7 @@ class VerificationApp(tk.Tk):
                          self.current_record_index = len(self.df) # Position after last record, indicating completion
                     logger.info(f"Resuming session. Starting at index {self.current_record_index} (0-based).")
                 else: # No corrected columns found in DF, cannot determine progress
-                    logger.warning("Resuming session, but no corrected columns (as defined in config) found in the loaded data. Starting at index 0.")
+                    logger.warning("Resuming session, but no corrected columns (as defined in app_config) found in the loaded data. Starting at index 0.")
             elif not self.df.empty: # New session or non-empty DataFrame
                  logger.info("New session or not resuming. Starting at index 0.")
 
@@ -1364,8 +1364,8 @@ class VerificationApp(tk.Tk):
             messagebox.showerror("File Not Found", f"The Excel file was not found: {file_to_load}", parent=self)
             self.df = None
         except KeyError as e:
-            logger.error(f"Sheet name error: {e}. Configured sheet: {self.config['sheet_name']}")
-            messagebox.showerror("Sheet Not Found", f"Sheet '{self.config['sheet_name']}' not found in '{os.path.basename(file_to_load)}'.\nPlease check the file or configuration.", parent=self)
+            logger.error(f"Sheet name error: {e}. Configured sheet: {self.app_config['sheet_name']}")
+            messagebox.showerror("Sheet Not Found", f"Sheet '{self.app_config['sheet_name']}' not found in '{os.path.basename(file_to_load)}'.\nPlease check the file or configuration.", parent=self)
             self.df = None
         except ValueError as e:
              logger.error(f"Error reading Excel file {file_to_load} (ValueError): {e}", exc_info=True)
@@ -1382,36 +1382,36 @@ class VerificationApp(tk.Tk):
     def load_configuration(self, config_path="config.json"):
         try:
             with open(config_path, 'r') as f:
-                self.config = json.load(f)
+                self.app_config = json.load(f)
             logger.info(f"Configuration loaded successfully from {config_path}")
         except FileNotFoundError:
             logger.warning(f"Configuration file {config_path} not found.")
             self.create_default_config(config_path)
             try:
                 with open(config_path, 'r') as f:
-                    self.config = json.load(f)
+                    self.app_config = json.load(f)
                 logger.info(f"Configuration loaded successfully after creation: {config_path}")
             except FileNotFoundError: # Should not happen if creation was successful and user agreed
                 logger.error(f"Failed to load config file {config_path} even after attempting creation.")
-                self.config = None # Ensure config is None
+                self.app_config = None # Ensure config is None
             except json.JSONDecodeError as e:
                 logger.error(f"Error decoding JSON from {config_path} after creation: {e}")
                 messagebox.showerror("Configuration Error", f"Error parsing newly created {config_path}. Please check its format or delete it to recreate.")
-                self.config = None # Ensure config is None
+                self.app_config = None # Ensure config is None
             except Exception as e:
                 logger.error(f"Unexpected error loading {config_path} after creation: {e}")
                 messagebox.showerror("Configuration Error", f"An unexpected error occurred while loading {config_path} after creation.")
-                self.config = None # Ensure config is None
+                self.app_config = None # Ensure config is None
         except json.JSONDecodeError as e:
             logger.error(f"Error decoding JSON from {config_path}: {e}")
             messagebox.showerror("Configuration Error", f"Error parsing {config_path}. Please check its format.")
-            self.config = None # Ensure config is None
+            self.app_config = None # Ensure config is None
             # Decide if to exit or use defaults. For now, set to None and let __init__ handle exit.
         except OSError as e:
             logger.error(f"OS error reading {config_path}: {e}")
             messagebox.showerror("File Error", f"Error reading configuration file {config_path}: {e}\nApplication will exit.")
-            self.config = None # Ensure config is None
-            # self.destroy() called from __init__ if self.config is None
+            self.app_config = None # Ensure config is None
+            # self.destroy() called from __init__ if self.app_config is None
 
     def create_default_config(self, config_path="config.json"):
         logger.info(f"Attempting to create default configuration file at {config_path}")
@@ -1426,21 +1426,21 @@ class VerificationApp(tk.Tk):
             except OSError as e:
                 logger.error(f"Error creating default configuration file {config_path}: {e}")
                 messagebox.showerror("File Creation Error", f"Could not create default configuration file: {e}\nApplication cannot proceed.")
-                # No self.config yet, and this path leads to self.config remaining None
+                # No self.app_config yet, and this path leads to self.app_config remaining None
         else:
             logger.warning("User declined to create a default configuration file.")
             messagebox.showwarning("Configuration Missing", "Application cannot proceed without a configuration file. Exiting.")
-            # No self.config yet, and this path leads to self.config remaining None
+            # No self.app_config yet, and this path leads to self.app_config remaining None
 
     def edit_configuration(self):
         logger.info("Edit Configuration clicked.")
-        if not self.config:
+        if not self.app_config:
             logger.error("Cannot edit configuration: No configuration loaded.")
             messagebox.showerror("Error", "Configuration is not loaded. Cannot open edit window.")
             return
-        # Pass self (VerificationApp instance) as master, and its config
-        EditConfigurationWindow(self, self.config)
-        # The EditConfigurationWindow will call self.master.config = ... on save
+        # Pass self (VerificationApp instance) as master, and its app_config
+        EditConfigurationWindow(self, self.app_config)
+        # The EditConfigurationWindow will call self.master.app_config = ... on save
 
     def show_about(self):
         logger.info("Show About clicked")
@@ -1456,7 +1456,7 @@ class VerificationApp(tk.Tk):
             messagebox.showwarning("No Data", "There is no data to analyze.", parent=self)
             return
 
-        analyzer = StatisticsAnalyzer(self.df.copy(), self.config)
+        analyzer = StatisticsAnalyzer(self.df.copy(), self.app_config)
         report_text = analyzer.analyze()
         StatisticsDialog(self, report_text)
 
@@ -1504,9 +1504,9 @@ class VerificationApp(tk.Tk):
 
 
 class StatisticsAnalyzer:
-    def __init__(self, df, config):
+    def __init__(self, df, app_config):
         self.df = df
-        self.config = config
+        self.app_config = app_config
 
     def analyze(self):
         """
@@ -1519,7 +1519,7 @@ class StatisticsAnalyzer:
         report.append("Correction Statistics Report")
         report.append("=" * 30)
 
-        column_mapping = self.config.get("column_mapping", {})
+        column_mapping = self.app_config.get("column_mapping", {})
         correction_fields = [k.replace('_corrected', '') for k in column_mapping if k.endswith('_corrected')]
 
         total_records = len(self.df)
