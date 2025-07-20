@@ -8,6 +8,7 @@ from datetime import datetime
 import copy
 import pandas as pd
 from PIL import Image, ImageTk
+from statistics_analyzer import StatisticsAnalyzer, StatisticsDialog
 
 # Setup logging
 logger = logging.getLogger('DataIntegritySuite')
@@ -567,6 +568,11 @@ class VerificationApp(tk.Tk):
         settings_menu.add_command(label="Edit Configuration", command=self.edit_configuration)
         menubar.add_cascade(label="Settings", menu=settings_menu)
 
+        # Analysis Menu
+        analysis_menu = tk.Menu(menubar, tearoff=0)
+        analysis_menu.add_command(label="Show Statistics", command=self.show_statistics)
+        menubar.add_cascade(label="Analysis", menu=analysis_menu)
+
         # Help Menu
         help_menu = tk.Menu(menubar, tearoff=0)
         help_menu.add_command(label="About", command=self.show_about)
@@ -974,6 +980,14 @@ class VerificationApp(tk.Tk):
             f"Total Records in File: {len(self.df) if self.df is not None else 'N/A'}",
             f"Records with Corrections Made in Session: {actual_corrections_count}"
         ]
+
+        report_lines.append("\n" + "="*30 + "\n")
+
+        # Add detailed statistics
+        analyzer = StatisticsAnalyzer(self.df.copy(), self.config)
+        stats_text = analyzer.analyze()
+        report_lines.append(stats_text)
+
         report_text = "\n".join(report_lines)
         logger.info("Session report text generated.")
         logger.info(f"\n{report_text}") # Log the report itself
@@ -1435,6 +1449,16 @@ class VerificationApp(tk.Tk):
     def show_user_guide(self):
         logger.info("Show User Guide clicked")
         messagebox.showinfo("User Guide", "User Guide clicked (placeholder).")
+
+    def show_statistics(self):
+        logger.info("Show Statistics clicked.")
+        if self.df is None or self.df.empty:
+            messagebox.showwarning("No Data", "There is no data to analyze.", parent=self)
+            return
+
+        analyzer = StatisticsAnalyzer(self.df.copy(), self.config)
+        report_text = analyzer.analyze()
+        StatisticsDialog(self, report_text)
 
     def quit(self):
         logger.info("Quit action initiated.")
