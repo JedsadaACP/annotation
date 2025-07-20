@@ -1,6 +1,6 @@
 import unittest
 import pandas as pd
-from statistics_analyzer import StatisticsAnalyzer
+from data_integrity_suite import StatisticsAnalyzer
 
 class TestStatisticsAnalyzer(unittest.TestCase):
 
