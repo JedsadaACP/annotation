@@ -26,23 +26,6 @@ ch_formatter = logging.Formatter('%(levelname)s: %(message)s')
 ch.setFormatter(ch_formatter)
 logger.addHandler(ch)
 
-DEFAULT_CONFIG = {
-    "sheet_name": "Sheet1",
-    "provinces": [
-        "Bangkok", "Nonthaburi", "Pathum Thani", "Samut Prakan",
-        "Chiang Mai", "Phuket", "Chonburi", "Nakhon Ratchasima", "Songkhla"
-    ],
-    "column_mapping": {
-        "container_number_original": "OriginalContainerNo",
-        "container_number_corrected": "CorrectedContainerNo",
-        "license_plate_original": "OriginalLicensePlate",
-        "license_plate_corrected": "CorrectedLicensePlate",
-        "province_original": "OriginalProvince",
-        "province_corrected": "CorrectedProvince",
-        "image_paths": ["ImagePath1", "ImagePath2", "ImagePath3", "ImagePath4"]
-    }
-}
-
 # --- Global Constants ---
 
 # Font Families
@@ -310,118 +293,6 @@ class AutocompleteEntry(ttk.Entry):
             self.hide_popup()
 
 
-class EditConfigurationWindow(tk.Toplevel):
-    def __init__(self, master, current_config):
-        super().__init__(master)
-        self.master = master
-        self.protocol("WM_DELETE_WINDOW", self._on_cancel) # Handle window close button
-        self.title("Edit Configuration")
-        self.configure(bg="#2E2E2E") # Dark theme background
-
-        # Make modal
-        self.transient(master)
-        self.grab_set()
-
-        self.editable_config = copy.deepcopy(current_config)
-        self.entry_widgets = {} # To store entry fields for easy access
-
-        # UI Elements
-        main_frame = ttk.Frame(self, padding="10 10 10 10", style="Dark.TFrame") # Style for frame
-        main_frame.pack(expand=True, fill=tk.BOTH)
-
-        # Styling for ttk widgets
-        style = ttk.Style(self)
-        # Using "App." prefix for styles specific to this dialog if needed, or use global VerificationApp styles
-        style.configure("App.TFrame", background=THEME_BACKGROUND) # Matches VerificationApp's app_frame
-        style.configure("Dialog.TLabel", background=THEME_BACKGROUND, foreground=THEME_TEXT_COLOR, font=GENERAL_LABEL_FONT)
-        style.configure("Dialog.TEntry",
-                        font=DATA_ENTRY_FONT,
-                        fieldbackground=THEME_ENTRY_FIELD_BG,
-                        foreground=THEME_ENTRY_TEXT_COLOR,
-                        insertbackground=THEME_ENTRY_INSERT_COLOR)
-        style.configure("Dialog.TButton", font=BUTTON_FONT, background=THEME_COMPONENT_BG, foreground=THEME_BUTTON_FG)
-        style.map("Dialog.TButton", background=[('active', THEME_ENTRY_FIELD_BG)]) # Slightly lighter for active
-        style.configure("Dialog.TLabelFrame", background=THEME_BACKGROUND, foreground=THEME_LABELFRAME_FG, font=GENERAL_LABEL_FONT)
-        style.configure("Dialog.TLabelFrame.Label", background=THEME_BACKGROUND, foreground=THEME_LABELFRAME_FG, font=GENERAL_LABEL_FONT)
-
-
-        # Sheet Name
-        ttk.Label(main_frame, text="Sheet Name:", style="Dialog.TLabel").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
-        self.entry_widgets["sheet_name"] = ttk.Entry(main_frame, width=50, style="Dialog.TEntry")
-        self.entry_widgets["sheet_name"].insert(0, self.editable_config.get("sheet_name", ""))
-        self.entry_widgets["sheet_name"].grid(row=0, column=1, sticky=tk.EW, padx=5, pady=5)
-
-        # Provinces
-        ttk.Label(main_frame, text="Provinces (comma-separated):", style="Dialog.TLabel").grid(row=1, column=0, sticky=tk.W, padx=5, pady=5)
-        # For provinces entry, using THAI_FONT_FAMILY could be beneficial if direct input of Thai is expected here
-        self.entry_widgets["provinces"] = ttk.Entry(main_frame, width=50, style="Dialog.TEntry", font=PROVINCE_FONT)
-        self.entry_widgets["provinces"].insert(0, ", ".join(self.editable_config.get("provinces", [])))
-        self.entry_widgets["provinces"].grid(row=1, column=1, sticky=tk.EW, padx=5, pady=5)
-
-        # Column Mapping
-        map_frame = ttk.LabelFrame(main_frame, text="Column Mapping", style="Dialog.TLabelFrame", padding="10 10 10 10")
-        map_frame.grid(row=2, column=0, columnspan=2, sticky=tk.EW, padx=5, pady=10)
-        map_frame.columnconfigure(1, weight=1) # Allow entry widgets to expand
-
-        self.entry_widgets["column_mapping"] = {}
-        row_idx = 0
-        for key, value in self.editable_config.get("column_mapping", {}).items():
-            ttk.Label(map_frame, text=f"{key}:", style="Dialog.TLabel").grid(row=row_idx, column=0, sticky=tk.W, padx=5, pady=2)
-            entry = ttk.Entry(map_frame, width=40, style="Dialog.TEntry")
-            if isinstance(value, list):
-                entry.insert(0, ", ".join(value))
-            else:
-                entry.insert(0, str(value))
-            entry.grid(row=row_idx, column=1, sticky=tk.EW, padx=5, pady=2)
-            self.entry_widgets["column_mapping"][key] = entry
-            row_idx += 1
-
-        # Buttons Frame
-        buttons_frame = ttk.Frame(main_frame, style="App.TFrame") # Use App.TFrame for consistency if bg is THEME_BACKGROUND
-        buttons_frame.grid(row=3, column=0, columnspan=2, pady=10)
-
-        save_button = ttk.Button(buttons_frame, text="Save", command=self._on_save, style="Dialog.TButton")
-        save_button.pack(side=tk.LEFT, padx=5)
-        cancel_button = ttk.Button(buttons_frame, text="Cancel", command=self._on_cancel, style="Dialog.TButton")
-        cancel_button.pack(side=tk.LEFT, padx=5)
-
-        main_frame.columnconfigure(1, weight=1) # Allow entry column to expand
-
-        logger.info("EditConfigurationWindow opened.")
-        self.master.eval(f'tk::PlaceWindow {str(self)} center') # Center window
-        self.wait_window() # Wait for window to be closed before returning control to master
-
-    def _on_save(self):
-        logger.info("Attempting to save configuration.")
-        # Retrieve values and update editable_config
-        self.editable_config["sheet_name"] = self.entry_widgets["sheet_name"].get()
-
-        provinces_str = self.entry_widgets["provinces"].get()
-        self.editable_config["provinces"] = [p.strip() for p in provinces_str.split(',') if p.strip()]
-
-        for key, entry_widget in self.entry_widgets["column_mapping"].items():
-            value_str = entry_widget.get()
-            # Check original type to decide if it should be a list
-            if isinstance(DEFAULT_CONFIG["column_mapping"].get(key), list):
-                 self.editable_config["column_mapping"][key] = [v.strip() for v in value_str.split(',') if v.strip()]
-            else:
-                self.editable_config["column_mapping"][key] = value_str
-
-        try:
-            with open("config.json", 'w') as f:
-                json.dump(self.editable_config, f, indent=4)
-
-            self.master.config = copy.deepcopy(self.editable_config) # Update main app's config
-            logger.info("Configuration saved successfully to config.json and updated in main app.")
-            messagebox.showinfo("Success", "Configuration saved successfully.", parent=self)
-            self.destroy()
-        except (IOError, OSError) as e:
-            logger.error(f"Error saving configuration to config.json: {e}")
-            messagebox.showerror("Save Error", f"Failed to save configuration: {e}", parent=self)
-
-    def _on_cancel(self):
-        logger.info("Configuration editing cancelled.")
-        self.destroy()
 
 class VerificationApp(tk.Tk):
     def __init__(self, excel_file_path):
@@ -429,14 +300,22 @@ class VerificationApp(tk.Tk):
         self.input_excel_path = excel_file_path # Store the input excel path
         logger.info(f"Application trying to start with Excel file: {self.input_excel_path}")
 
-        self.app_config = None
-        self.load_configuration("config.json")
-
-        if not self.app_config:
-            logger.error("Configuration not loaded. Application cannot continue.")
-            # Messagebox already shown by load_configuration or create_default_config if they lead to self.app_config being None
-            self.destroy()
-            return # Stop further initialization
+        self.app_config = {
+            "sheet_name": "Sheet1",
+            "provinces": [
+                "Bangkok", "Nonthaburi", "Pathum Thani", "Samut Prakan",
+                "Chiang Mai", "Phuket", "Chonburi", "Nakhon Ratchasima", "Songkhla"
+            ],
+            "column_mapping": {
+                "container_number_original": "OriginalContainerNo",
+                "container_number_corrected": "CorrectedContainerNo",
+                "license_plate_original": "OriginalLicensePlate",
+                "license_plate_corrected": "CorrectedLicensePlate",
+                "province_original": "OriginalProvince",
+                "province_corrected": "CorrectedProvince",
+                "image_paths": ["ImagePath1", "ImagePath2", "ImagePath3", "ImagePath4"]
+            }
+        }
 
         # Data and Session related initializations
         self.df = None
@@ -562,11 +441,6 @@ class VerificationApp(tk.Tk):
         file_menu = tk.Menu(menubar, tearoff=0)
         file_menu.add_command(label="Exit", command=self.quit)
         menubar.add_cascade(label="File", menu=file_menu)
-
-        # Settings Menu
-        settings_menu = tk.Menu(menubar, tearoff=0)
-        settings_menu.add_command(label="Edit Configuration", command=self.edit_configuration)
-        menubar.add_cascade(label="Settings", menu=settings_menu)
 
         # Analysis Menu
         analysis_menu = tk.Menu(menubar, tearoff=0)
@@ -1378,69 +1252,6 @@ class VerificationApp(tk.Tk):
 
         self.update_status_bar() # Update status bar based on outcome
 
-
-    def load_configuration(self, config_path="config.json"):
-        try:
-            with open(config_path, 'r') as f:
-                self.app_config = json.load(f)
-            logger.info(f"Configuration loaded successfully from {config_path}")
-        except FileNotFoundError:
-            logger.warning(f"Configuration file {config_path} not found.")
-            self.create_default_config(config_path)
-            try:
-                with open(config_path, 'r') as f:
-                    self.app_config = json.load(f)
-                logger.info(f"Configuration loaded successfully after creation: {config_path}")
-            except FileNotFoundError: # Should not happen if creation was successful and user agreed
-                logger.error(f"Failed to load config file {config_path} even after attempting creation.")
-                self.app_config = None # Ensure config is None
-            except json.JSONDecodeError as e:
-                logger.error(f"Error decoding JSON from {config_path} after creation: {e}")
-                messagebox.showerror("Configuration Error", f"Error parsing newly created {config_path}. Please check its format or delete it to recreate.")
-                self.app_config = None # Ensure config is None
-            except Exception as e:
-                logger.error(f"Unexpected error loading {config_path} after creation: {e}")
-                messagebox.showerror("Configuration Error", f"An unexpected error occurred while loading {config_path} after creation.")
-                self.app_config = None # Ensure config is None
-        except json.JSONDecodeError as e:
-            logger.error(f"Error decoding JSON from {config_path}: {e}")
-            messagebox.showerror("Configuration Error", f"Error parsing {config_path}. Please check its format.")
-            self.app_config = None # Ensure config is None
-            # Decide if to exit or use defaults. For now, set to None and let __init__ handle exit.
-        except OSError as e:
-            logger.error(f"OS error reading {config_path}: {e}")
-            messagebox.showerror("File Error", f"Error reading configuration file {config_path}: {e}\nApplication will exit.")
-            self.app_config = None # Ensure config is None
-            # self.destroy() called from __init__ if self.app_config is None
-
-    def create_default_config(self, config_path="config.json"):
-        logger.info(f"Attempting to create default configuration file at {config_path}")
-        if messagebox.askyesno("Create Default Configuration?",
-                               f"Configuration file '{config_path}' not found.\nDo you want to create a default configuration file?"):
-            try:
-                with open(config_path, 'w') as f:
-                    json.dump(DEFAULT_CONFIG, f, indent=4)
-                logger.info(f"Default configuration file created at {config_path}")
-                messagebox.showinfo("Configuration Created",
-                                    f"Default configuration file '{config_path}' created.\nPlease review and edit it if necessary.")
-            except OSError as e:
-                logger.error(f"Error creating default configuration file {config_path}: {e}")
-                messagebox.showerror("File Creation Error", f"Could not create default configuration file: {e}\nApplication cannot proceed.")
-                # No self.app_config yet, and this path leads to self.app_config remaining None
-        else:
-            logger.warning("User declined to create a default configuration file.")
-            messagebox.showwarning("Configuration Missing", "Application cannot proceed without a configuration file. Exiting.")
-            # No self.app_config yet, and this path leads to self.app_config remaining None
-
-    def edit_configuration(self):
-        logger.info("Edit Configuration clicked.")
-        if not self.app_config:
-            logger.error("Cannot edit configuration: No configuration loaded.")
-            messagebox.showerror("Error", "Configuration is not loaded. Cannot open edit window.")
-            return
-        # Pass self (VerificationApp instance) as master, and its app_config
-        EditConfigurationWindow(self, self.app_config)
-        # The EditConfigurationWindow will call self.master.app_config = ... on save
 
     def show_about(self):
         logger.info("Show About clicked")
